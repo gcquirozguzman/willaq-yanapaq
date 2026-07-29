@@ -1,0 +1,26 @@
+# Entornos virtuales de Python
+.venv/
+venv/
+env/
+
+# Archivos generados al ejecutar Python
+__pycache__/
+*.pyc
+
+# Configuración local de cada profesor: correo, cursos, etc.
+# Cada profesor tiene el suyo propio a partir de .env.example. NUNCA se sube al repo.
+.env
+
+# Perfil de navegador guardado (cookies, sesión de Blackboard/Microsoft).
+# Es información personal de cada profesor y nunca debe subirse al repositorio.
+datos/*
+!datos/.gitkeep
+
+# Archivos Excel generados (pueden contener anuncios y contenido de los cursos).
+plantillas_generadas/*
+!plantillas_generadas/.gitkeep
+
+# Archivos propios del sistema operativo / editores
+.DS_Store
+.vscode/
+.idea/
