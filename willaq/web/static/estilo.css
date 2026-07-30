@@ -630,6 +630,11 @@ html[data-tema="oscuro"] .logo-claro {
   resize: vertical;
 }
 
+.campo input:read-only {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
 .fila-campos {
   display: flex;
   gap: 12px;

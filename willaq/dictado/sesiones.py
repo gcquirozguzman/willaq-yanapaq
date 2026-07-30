@@ -9,11 +9,15 @@ y esta configuración la lee de ahí cuando la necesita.
 
 Igual que con los anuncios semanales, esto solo valida y guarda la
 configuración (una por curso). El cálculo real de las fechas de cada
-sesión se hace en el panel (JavaScript) cuando el docente abre "Ver
-Sesiones de Dictado", para poder marcar ahí mismo los feriados en rojo.
+sesión se hace principalmente en el panel (JavaScript) cuando el docente
+abre "Ver Sesiones de Dictado", para poder marcar ahí mismo los feriados
+en rojo; 'generar_fechas_sesiones' de acá abajo es la misma lógica del
+lado del servidor, usada solo para validar cruces de horario al
+reprogramar una sesión puntual (ver willaq/dictado/reprogramaciones.py).
 """
 
 import json
+from datetime import date, timedelta
 
 from willaq.config import DIR_DATOS
 from willaq.cursos.fechas import obtener_fechas_curso
@@ -50,6 +54,31 @@ def obtener_todas_las_configuraciones() -> dict:
     ya tiene un horario de dictado configurado o no.
     """
     return _cargar_configuraciones()
+
+
+def generar_fechas_sesiones(fecha_inicio_curso: str, fecha_fin_curso: str, horarios: dict) -> list:
+    """Genera las sesiones "base" (sin reprogramaciones) entre dos fechas.
+
+    Devuelve una lista de {"fecha", "hora_inicio", "hora_fin"}, una por cada
+    día entre fecha_inicio_curso y fecha_fin_curso (incluidos) que tenga
+    horario configurado, en el mismo orden en que las genera el panel.
+    """
+    inicio = date.fromisoformat(fecha_inicio_curso)
+    fin = date.fromisoformat(fecha_fin_curso)
+
+    sesiones = []
+    fecha = inicio
+    while fecha <= fin:
+        horario = horarios.get(DIAS_SEMANA[fecha.weekday()])
+        if horario:
+            sesiones.append({
+                "fecha": fecha.isoformat(),
+                "hora_inicio": horario["hora_inicio"],
+                "hora_fin": horario["hora_fin"],
+            })
+        fecha += timedelta(days=1)
+
+    return sesiones
 
 
 def reiniciar_configuraciones():

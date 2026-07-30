@@ -140,11 +140,18 @@ Esto abre automáticamente una pestaña en tu navegador
   clase se dejan vacíos). Dentro del mismo formulario:
   - **Ver Sesiones**: genera la grilla de sesiones (una por cada día con
     clase, con el nombre "SESIÓN NN - <curso> (<código>) - <tu nombre>"),
-    siempre desde la fecha actual en adelante, nunca desde el pasado.
+    desde el inicio hasta el fin del curso. Cada sesión se puede
+    reprogramar puntualmente (nueva fecha/hora, con motivo obligatorio) sin
+    tocar el horario semanal; la fila queda en amarillo y su fecha/hora
+    original sigue disponible con el botón "Detalle".
   - **Feriados**: un listado editable de los feriados peruanos del año
     actual (con Semana Santa calculada según la fecha real de Pascua de
     ese año), para agregar o quitar fechas a demanda. Las sesiones que
     caen en un feriado se resaltan en rojo en la grilla.
+  - **Generar en Blackboard**: publica, como anuncios reales programados
+    (igual que "Generar Anuncios Semanales"), solo las sesiones desde hoy
+    en adelante; las que ya pasaron no se publican. Pide confirmación antes
+    de publicar, ya que crea contenido real visible para tus estudiantes.
 
 La ventana del navegador de Blackboard (donde completas tu usuario, clave
 y el código SMS la primera vez) se sigue abriendo aparte, como una ventana
@@ -285,7 +292,9 @@ willaq/
 │   └── fechas.py            # Fecha de inicio/fin por curso (implementado)
 ├── dictado/
 │   ├── sesiones.py           # Guarda la config. de sesiones de dictado (implementado)
-│   └── feriados.py           # Feriados peruanos, editables (implementado)
+│   ├── reprogramaciones.py   # Reprogramación puntual de sesiones (implementado)
+│   ├── feriados.py           # Feriados peruanos, editables (implementado)
+│   └── publicar.py           # Publica las sesiones en Blackboard (implementado)
 ├── consulta_docente/
 │   └── consulta.py          # Consulta al docente (pendiente)
 ├── presentacion/

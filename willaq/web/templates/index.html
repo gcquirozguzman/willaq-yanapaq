@@ -416,6 +416,7 @@
       <p class="descripcion-dialogo">
         Se muestran desde el inicio hasta el fin del curso. Las filas en rojo caen en un feriado;
         las filas en amarillo fueron reprogramadas (usa "Detalle" para ver su fecha y hora original).
+        "Generar en Blackboard" solo publica, como anuncios reales, las sesiones desde hoy en adelante.
       </p>
 
       <div class="tabla-scroll">
@@ -434,6 +435,9 @@
       </div>
 
       <div class="botonera">
+        <button type="button" id="boton-generar-sesiones-en-blackboard" class="boton boton-primario">
+          Generar en Blackboard
+        </button>
         <button type="button" id="boton-abrir-feriados" class="boton boton-secundario">Feriados</button>
         <button type="button" id="boton-cerrar-ver-sesiones" class="boton boton-secundario">Cerrar</button>
       </div>
@@ -454,8 +458,8 @@
         <input type="time" id="campo-hora-inicio-reprogramada" required>
       </label>
       <label class="campo">
-        Nueva hora de fin
-        <input type="time" id="campo-hora-fin-reprogramada" required>
+        Nueva hora de fin (automática, según la duración original de la sesión)
+        <input type="time" id="campo-hora-fin-reprogramada" required readonly>
       </label>
       <label class="campo">
         Detalle (motivo del cambio)

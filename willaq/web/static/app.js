@@ -615,6 +615,19 @@ function sumarDias(fechaISO, dias) {
   return `${y}-${m}-${d}`;
 }
 
+function minutosDesdeHora(horaHHMM) {
+  const [horas, minutos] = horaHHMM.split(":").map(Number);
+  return horas * 60 + minutos;
+}
+
+function horaDesdeMinutos(totalMinutos) {
+  const minutosDia = 24 * 60;
+  const total = ((totalMinutos % minutosDia) + minutosDia) % minutosDia;
+  const horas = String(Math.floor(total / 60)).padStart(2, "0");
+  const minutos = String(total % 60).padStart(2, "0");
+  return `${horas}:${minutos}`;
+}
+
 // Arma una fila "Inicio" y una "Fin" por cada semana entre fecha_inicio_curso
 // y fecha_fin_curso, usando los días/horas elegidos en el asistente.
 //
@@ -1450,6 +1463,7 @@ const botonCerrarGuardadoSesionesOk = document.getElementById("boton-cerrar-guar
 
 const dialogoVerSesiones = document.getElementById("dialogo-ver-sesiones");
 const cuerpoTablaSesiones = document.getElementById("cuerpo-tabla-sesiones");
+const botonGenerarSesionesEnBlackboard = document.getElementById("boton-generar-sesiones-en-blackboard");
 const botonAbrirFeriados = document.getElementById("boton-abrir-feriados");
 const botonAbrirFeriadosTool = document.getElementById("boton-abrir-feriados-tool");
 const botonCerrarVerSesiones = document.getElementById("boton-cerrar-ver-sesiones");
@@ -1841,18 +1855,116 @@ async function abrirVistaSesiones() {
 botonVerSesiones.addEventListener("click", abrirVistaSesiones);
 botonCerrarVerSesiones.addEventListener("click", () => dialogoVerSesiones.close());
 
+// --- Generar Sesiones en Blackboard ---
+// Mismo mecanismo que "Generar en Blackboard" de Anuncios Semanales (cada
+// fila se crea como un anuncio real programado): reutiliza el mismo
+// diálogo de confirmación y de resultado. Solo se publican las sesiones
+// desde HOY en adelante (las pasadas ya sucedieron, no tiene sentido
+// "programarlas" en Blackboard), tomando la fecha/hora ya reprogramada si
+// corresponde.
+async function generarSesionesEnBlackboard() {
+  if (!configuracionSesionesActual) {
+    return;
+  }
+
+  const codigoCurso = configuracionSesionesActual.curso_codigo;
+  const cursoInfo = cursosObtenidos.find((curso) => curso.codigo === codigoCurso);
+  if (!cursoInfo || !cursoInfo.id) {
+    mostrarResultadoBlackboard(
+      "No se pudo identificar el curso",
+      'Vuelve a hacer clic en "Obtener Cursos Activos" para actualizar la lista de cursos, y luego intenta de nuevo.'
+    );
+    return;
+  }
+
+  const hoy = fechaHoyISO();
+  const filas = aplicarReprogramaciones(filasBaseSesionesActuales, reprogramacionesCurso);
+  const sesionesAGenerar = filas
+    .filter((sesion) => sesion.fecha >= hoy)
+    .map((sesion) => ({
+      titulo: sesion.sesion,
+      fecha: sesion.fecha,
+      hora_inicio: sesion.horaInicio,
+      hora_fin: sesion.horaFin,
+      detalle: sesion.modificado ? sesion.detalleCambio : "",
+    }));
+
+  if (sesionesAGenerar.length === 0) {
+    mostrarResultadoBlackboard("Nada que generar", "No hay sesiones desde hoy en adelante para publicar.");
+    return;
+  }
+
+  const confirmado = await confirmarGenerarEnBlackboard(
+    `Esto creará ${sesionesAGenerar.length} sesión(es) como anuncios reales en Blackboard, en el curso ` +
+      `"${cursoInfo.nombre}", desde hoy en adelante. ¿Deseas continuar?`
+  );
+  if (!confirmado) {
+    return;
+  }
+
+  botonGenerarSesionesEnBlackboard.disabled = true;
+  const textoOriginal = botonGenerarSesionesEnBlackboard.textContent;
+  botonGenerarSesionesEnBlackboard.textContent = "Generando...";
+
+  try {
+    const respuesta = await fetch("/api/sesiones-dictado/generar-en-blackboard", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id_curso: cursoInfo.id, sesiones: sesionesAGenerar }),
+    });
+    const resultado = await respuesta.json();
+
+    if (resultado.estado === "error") {
+      mostrarResultadoBlackboard("No se pudo generar", resultado.error || "No se pudo generar las sesiones en Blackboard.");
+      return;
+    }
+
+    let mensajeResultado = `Se publicaron ${resultado.publicados} de ${sesionesAGenerar.length} sesión(es) en Blackboard.`;
+    if (resultado.fallidos && resultado.fallidos.length > 0) {
+      mensajeResultado += ` No se pudieron publicar: ${resultado.fallidos.join(", ")}.`;
+    }
+    mostrarResultadoBlackboard(
+      resultado.fallidos && resultado.fallidos.length > 0 ? "Generado con avisos" : "Listo",
+      mensajeResultado
+    );
+  } finally {
+    botonGenerarSesionesEnBlackboard.disabled = false;
+    botonGenerarSesionesEnBlackboard.textContent = textoOriginal;
+  }
+}
+
+botonGenerarSesionesEnBlackboard.addEventListener("click", generarSesionesEnBlackboard);
+
 // --- Reprogramar / ver detalle de una sesión puntual ---
+
+// La hora de fin no se edita a mano: se recalcula siempre a partir de la
+// hora de inicio elegida más la duración de la sesión ORIGINAL (antes de
+// cualquier reprogramación), para no cambiar sin querer cuánto dura la
+// clase al moverla de fecha/hora.
+function actualizarHoraFinReprogramada() {
+  if (!sesionReprogramarActual) {
+    return;
+  }
+  const duracionMinutos =
+    minutosDesdeHora(sesionReprogramarActual.horaFinOriginal) -
+    minutosDesdeHora(sesionReprogramarActual.horaInicioOriginal);
+  campoHoraFinReprogramada.value = horaDesdeMinutos(
+    minutosDesdeHora(campoHoraInicioReprogramada.value) + duracionMinutos
+  );
+}
 
 function abrirModalReprogramarSesion(sesion) {
   sesionReprogramarActual = sesion;
   nombreSesionReprogramar.textContent = sesion.sesion;
   campoFechaReprogramada.value = sesion.fecha;
   campoHoraInicioReprogramada.value = sesion.horaInicio;
-  campoHoraFinReprogramada.value = sesion.horaFin;
   campoDetalleReprogramada.value = sesion.detalleCambio || "";
   mensajeReprogramarSesion.textContent = "";
+  actualizarHoraFinReprogramada();
   dialogoReprogramarSesion.showModal();
 }
+
+campoHoraInicioReprogramada.addEventListener("change", actualizarHoraFinReprogramada);
 
 async function guardarReprogramacionSesion() {
   if (!sesionReprogramarActual || !configuracionSesionesActual) {
