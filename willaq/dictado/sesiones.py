@@ -43,6 +43,15 @@ def obtener_configuracion_sesiones(curso_codigo: str):
     return _cargar_configuraciones().get(curso_codigo)
 
 
+def obtener_todas_las_configuraciones() -> dict:
+    """Devuelve {curso_codigo: configuración} de todos los cursos con horario guardado.
+
+    Se usa para saber, desde la tarjeta de cada curso en "Cursos activos", si
+    ya tiene un horario de dictado configurado o no.
+    """
+    return _cargar_configuraciones()
+
+
 def reiniciar_configuraciones():
     """Borra todas las configuraciones guardadas de sesiones de dictado.
 

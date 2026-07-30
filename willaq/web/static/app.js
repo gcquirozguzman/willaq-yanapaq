@@ -219,6 +219,16 @@ function hayCursoConFechas() {
   return cursosObtenidos.some((curso) => cursosFechas[curso.codigo]);
 }
 
+// Horarios de dictado configurados por curso (botón "Agregar horario de
+// dictado" / "Editar horario de dictado" en cada tarjeta de "Cursos
+// activos"), para saber si mostrar ese botón como "Agregar" o "Editar".
+let cursosSesiones = {};
+
+async function cargarCursosSesiones() {
+  const respuesta = await fetch("/api/sesiones-dictado");
+  cursosSesiones = await respuesta.json();
+}
+
 function actualizarBloqueoHerramientas(sesionActiva) {
   botonObtenerCursos.disabled = !sesionActiva;
   itemCursos.classList.toggle("bloqueada", !sesionActiva);
@@ -1240,6 +1250,7 @@ async function consultarEstadoCursos() {
 
   cursosObtenidos = estado.cursos;
   await cargarCursosFechas();
+  await cargarCursosSesiones();
   actualizarBloqueoPlantilla();
   actualizarBloqueoSesionesDictado();
 
@@ -1255,6 +1266,8 @@ async function consultarEstadoCursos() {
     listaCursos.appendChild(item);
     return;
   }
+
+  elementosTarjetasCursos = {};
 
   for (const curso of estado.cursos) {
     const item = document.createElement("li");
@@ -1272,12 +1285,23 @@ async function consultarEstadoCursos() {
 
     const botonFechas = document.createElement("button");
     botonFechas.type = "button";
-    botonFechas.className = "boton-fechas-curso";
+    botonFechas.className = "boton-accion-curso";
     botonFechas.addEventListener("click", () => abrirModalFechasCurso(curso, fechas, botonFechas));
 
-    actualizarFechasEnTarjeta(curso.codigo, fechas, botonFechas);
+    const horario = document.createElement("span");
+    horario.className = "horario-curso";
 
-    item.append(codigo, nombre, fechas, botonFechas);
+    const botonHorario = document.createElement("button");
+    botonHorario.type = "button";
+    botonHorario.className = "boton-accion-curso";
+    botonHorario.addEventListener("click", () => abrirAsistenteSesiones(curso.codigo));
+
+    elementosTarjetasCursos[curso.codigo] = { fechas, botonFechas, horario, botonHorario };
+
+    actualizarFechasEnTarjeta(curso.codigo, fechas, botonFechas);
+    actualizarHorarioEnTarjeta(curso.codigo, horario, botonHorario);
+
+    item.append(codigo, nombre, fechas, botonFechas, horario, botonHorario);
     listaCursos.appendChild(item);
   }
 }
@@ -1302,6 +1326,14 @@ const botonCancelarFechasCurso = document.getElementById("boton-cancelar-fechas-
 // actualmente abierto, para poder actualizar esa misma tarjeta al guardar.
 let cursoFechasActual = null;
 
+// Elementos (fechas/horario, y sus botones) de cada tarjeta de curso
+// actualmente renderizada, por código de curso. Se repuebla cada vez que se
+// vuelve a dibujar la lista de "Cursos activos" (ver consultarEstadoCursos).
+// Sirve para poder actualizar la tarjeta correcta después de guardar,
+// incluso cuando el asistente se abrió desde el botón "Generar Sesiones
+// Dictado" de la lista de Herramientas y no desde la propia tarjeta.
+let elementosTarjetasCursos = {};
+
 function formatearFechaCorta(iso) {
   if (!iso) {
     return "";
@@ -1321,6 +1353,18 @@ function actualizarFechasEnTarjeta(codigoCurso, fechasEl, botonEl) {
     fechasEl.classList.add("sin-configurar");
     botonEl.textContent = "Configurar fechas";
   }
+}
+
+function actualizarHorarioEnTarjeta(codigoCurso, horarioEl, botonEl) {
+  const configurado = Boolean(cursosSesiones[codigoCurso]);
+  const tieneFechas = Boolean(cursosFechas[codigoCurso]);
+
+  horarioEl.textContent = configurado ? "Horario de dictado configurado" : "Sin horario de dictado";
+  horarioEl.classList.toggle("sin-configurar", !configurado);
+
+  botonEl.textContent = configurado ? "Editar horario de dictado" : "Agregar horario de dictado";
+  botonEl.disabled = !tieneFechas;
+  botonEl.title = tieneFechas ? "" : "Primero configura la fecha de inicio y fin de este curso.";
 }
 
 function abrirModalFechasCurso(curso, fechasEl, botonEl) {
@@ -1373,6 +1417,12 @@ async function guardarFechasCurso() {
     fecha_fin_curso: datos.fecha_fin_curso,
   };
   actualizarFechasEnTarjeta(datos.curso_codigo, cursoFechasActual.fechasEl, cursoFechasActual.botonEl);
+  // Configurar las fechas puede ser justo lo que faltaba para habilitar el
+  // botón de horario de dictado de esta misma tarjeta.
+  const elementos = elementosTarjetasCursos[datos.curso_codigo];
+  if (elementos) {
+    actualizarHorarioEnTarjeta(datos.curso_codigo, elementos.horario, elementos.botonHorario);
+  }
   actualizarBloqueoPlantilla();
   actualizarBloqueoSesionesDictado();
   dialogoFechasCurso.close();
@@ -1384,8 +1434,8 @@ botonCancelarFechasCurso.addEventListener("click", () => dialogoFechasCurso.clos
 // --- Generar Sesiones Dictado ---
 // Mismo patrón que "Generar Anuncios Semanales": un asistente que guarda
 // la configuración por curso, y un botón "Ver Sesiones" que solo se
-// habilita después de guardar y que genera la grilla real (desde hoy en
-// adelante, nunca desde el pasado).
+// habilita después de guardar y que genera la grilla real, desde la fecha
+// de inicio del curso hasta su fecha de fin.
 
 const dialogoSesiones = document.getElementById("dialogo-sesiones-dictado");
 const campoCursoSesiones = document.getElementById("campo-curso-sesiones");
@@ -1401,18 +1451,64 @@ const botonCerrarGuardadoSesionesOk = document.getElementById("boton-cerrar-guar
 const dialogoVerSesiones = document.getElementById("dialogo-ver-sesiones");
 const cuerpoTablaSesiones = document.getElementById("cuerpo-tabla-sesiones");
 const botonAbrirFeriados = document.getElementById("boton-abrir-feriados");
+const botonAbrirFeriadosTool = document.getElementById("boton-abrir-feriados-tool");
 const botonCerrarVerSesiones = document.getElementById("boton-cerrar-ver-sesiones");
+
+const dialogoReprogramarSesion = document.getElementById("dialogo-reprogramar-sesion");
+const nombreSesionReprogramar = document.getElementById("nombre-sesion-reprogramar");
+const campoFechaReprogramada = document.getElementById("campo-fecha-reprogramada");
+const campoHoraInicioReprogramada = document.getElementById("campo-hora-inicio-reprogramada");
+const campoHoraFinReprogramada = document.getElementById("campo-hora-fin-reprogramada");
+const campoDetalleReprogramada = document.getElementById("campo-detalle-reprogramada");
+const mensajeReprogramarSesion = document.getElementById("mensaje-reprogramar-sesion");
+const botonGuardarReprogramarSesion = document.getElementById("boton-guardar-reprogramar-sesion");
+const botonCancelarReprogramarSesion = document.getElementById("boton-cancelar-reprogramar-sesion");
+
+const dialogoDetalleSesion = document.getElementById("dialogo-detalle-sesion");
+const nombreSesionDetalle = document.getElementById("nombre-sesion-detalle");
+const detalleFechaOriginal = document.getElementById("detalle-fecha-original");
+const detalleHoraOriginal = document.getElementById("detalle-hora-original");
+const detalleMotivoCambioFila = document.getElementById("detalle-motivo-cambio-fila");
+const detalleMotivoCambio = document.getElementById("detalle-motivo-cambio");
+const botonCerrarDetalleSesion = document.getElementById("boton-cerrar-detalle-sesion");
 
 const dialogoFeriados = document.getElementById("dialogo-feriados");
 const listaFeriados = document.getElementById("lista-feriados");
 const campoNuevoFeriado = document.getElementById("campo-nuevo-feriado");
+const campoMotivoNuevoFeriado = document.getElementById("campo-motivo-nuevo-feriado");
 const botonAgregarFeriado = document.getElementById("boton-agregar-feriado");
+const mensajeFeriados = document.getElementById("mensaje-feriados");
 const botonCerrarFeriados = document.getElementById("boton-cerrar-feriados");
 
 // Configuración de sesiones ya guardada con éxito en el asistente; "Ver
 // Sesiones" solo se habilita después de guardar.
 let configuracionSesionesActual = null;
+
+// Sesiones "base" (fecha/hora originales, sin reprogramaciones) del curso
+// que se está viendo en "Ver Sesiones", calculadas al abrir el modal.
+let filasBaseSesionesActuales = [];
+
+// Reprogramaciones puntuales del curso que se está viendo, como
+// {fecha_original: {fecha_nueva, hora_inicio, hora_fin, detalle}}.
+let reprogramacionesCurso = {};
+
+// Sesión (ya con la reprogramación aplicada) sobre la que se hizo clic en
+// "Cambiar", mientras el modal de reprogramar está abierto.
+let sesionReprogramarActual = null;
+
+// Últimos feriados cargados, como lista de {fecha, motivo} ordenada
+// ascendentemente por fecha (ver ordenarFeriados). El servidor los guarda
+// como {"YYYY-MM-DD": "motivo"}; se convierten a lista aquí para poder
+// recorrerlos y ordenarlos con facilidad en el panel.
 let ultimosFeriadosCargados = [];
+
+function ordenarFeriados(feriados) {
+  return [...feriados].sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0));
+}
+
+function objetoFeriadosALista(objeto) {
+  return ordenarFeriados(Object.entries(objeto).map(([fecha, motivo]) => ({ fecha, motivo })));
+}
 
 function construirTablaHorarioSemanal() {
   tablaHorarioSemanal.innerHTML = "";
@@ -1484,7 +1580,11 @@ async function precargarConfiguracionSesiones(codigoCurso) {
   }
 }
 
-function abrirAsistenteSesiones() {
+// 'codigoPreseleccionado' se usa cuando el asistente se abre desde el botón
+// "Agregar/Editar horario de dictado" de una tarjeta de curso puntual (ver
+// consultarEstadoCursos), para que ese curso ya salga elegido en el select
+// en vez del primero de la lista.
+function abrirAsistenteSesiones(codigoPreseleccionado) {
   campoCursoSesiones.innerHTML = "";
   // Solo se listan los cursos que ya tienen fecha de inicio/fin configurada
   // desde "Cursos activos": este asistente ya no las pide.
@@ -1494,6 +1594,10 @@ function abrirAsistenteSesiones() {
     opcion.value = curso.codigo;
     opcion.textContent = curso.nombre;
     campoCursoSesiones.appendChild(opcion);
+  }
+
+  if (typeof codigoPreseleccionado === "string" && cursosFechas[codigoPreseleccionado]) {
+    campoCursoSesiones.value = codigoPreseleccionado;
   }
 
   mensajeAsistenteSesiones.textContent = "";
@@ -1507,7 +1611,7 @@ campoCursoSesiones.addEventListener("change", () => {
   precargarConfiguracionSesiones(campoCursoSesiones.value);
 });
 
-botonGenerarSesionesDictado.addEventListener("click", abrirAsistenteSesiones);
+botonGenerarSesionesDictado.addEventListener("click", () => abrirAsistenteSesiones());
 botonCancelarSesiones.addEventListener("click", () => dialogoSesiones.close());
 
 async function guardarSesionesDictado() {
@@ -1554,6 +1658,13 @@ async function guardarSesionesDictado() {
   mensajeAsistenteSesiones.textContent = "";
   configuracionSesionesActual = datos;
   botonVerSesiones.disabled = false;
+
+  cursosSesiones[datos.curso_codigo] = datos;
+  const elementos = elementosTarjetasCursos[datos.curso_codigo];
+  if (elementos) {
+    actualizarHorarioEnTarjeta(datos.curso_codigo, elementos.horario, elementos.botonHorario);
+  }
+
   dialogoGuardadoSesionesOk.showModal();
 }
 
@@ -1575,34 +1686,19 @@ function nombreDocenteParaSesion() {
   return nombreDocenteActual;
 }
 
-// Arma una fila por cada sesión de dictado, desde hoy (nunca desde el
-// pasado) hasta fecha_fin_curso, usando el horario semanal guardado.
+// Arma una fila "base" por cada sesión de dictado, desde fecha_inicio_curso
+// hasta fecha_fin_curso, usando el horario semanal guardado. Son las fechas
+// y horas originales, antes de aplicar cualquier reprogramación puntual.
 function generarFilasSesiones(configuracion) {
-  const hoy = fechaHoyISO();
-  const fechaInicio = configuracion.fecha_inicio_curso > hoy ? configuracion.fecha_inicio_curso : hoy;
-
-  const codigoCorto = configuracion.curso_nombre.split(" ")[0];
-  const nombreSinCodigo = configuracion.curso_nombre.slice(codigoCorto.length + 1);
-  const nombreDocenteSesion = nombreDocenteParaSesion();
-
   const filas = [];
-  let nro = 1;
-  let fecha = fechaInicio;
+  let fecha = configuracion.fecha_inicio_curso;
 
   while (fecha <= configuracion.fecha_fin_curso) {
     const dia = DIAS_SEMANA[indiceDiaSemana(fecha)].toLowerCase();
     const horario = configuracion.horarios[dia];
 
     if (horario) {
-      const numeroSesion = String(nro).padStart(2, "0");
-      filas.push({
-        nro: nro,
-        sesion: `SESIÓN ${numeroSesion} - ${nombreSinCodigo} (${codigoCorto}) - ${nombreDocenteSesion}`,
-        fecha,
-        horaInicio: horario.hora_inicio,
-        horaFin: horario.hora_fin,
-      });
-      nro += 1;
+      filas.push({ fecha, horaInicio: horario.hora_inicio, horaFin: horario.hora_fin });
     }
 
     fecha = sumarDias(fecha, 1);
@@ -1611,13 +1707,106 @@ function generarFilasSesiones(configuracion) {
   return filas;
 }
 
+// Aplica las reprogramaciones puntuales (por fecha original) a las filas
+// base, reordena por la fecha/hora resultante y renombra cada sesión según
+// su posición final: es lo que hace que, al reprogramar una sesión, toda la
+// grilla se reordene y las SESIÓN 01/02/... queden actualizadas.
+function aplicarReprogramaciones(filasBase, reprogramaciones) {
+  const filas = filasBase.map((sesion) => {
+    const cambio = reprogramaciones[sesion.fecha];
+    return {
+      fechaOriginal: sesion.fecha,
+      horaInicioOriginal: sesion.horaInicio,
+      horaFinOriginal: sesion.horaFin,
+      fecha: cambio ? cambio.fecha_nueva : sesion.fecha,
+      horaInicio: cambio ? cambio.hora_inicio : sesion.horaInicio,
+      horaFin: cambio ? cambio.hora_fin : sesion.horaFin,
+      detalleCambio: cambio ? cambio.detalle : "",
+      modificado: Boolean(cambio),
+    };
+  });
+
+  filas.sort((a, b) => {
+    if (a.fecha !== b.fecha) return a.fecha < b.fecha ? -1 : 1;
+    return a.horaInicio < b.horaInicio ? -1 : a.horaInicio > b.horaInicio ? 1 : 0;
+  });
+
+  const codigoCorto = configuracionSesionesActual.curso_nombre.split(" ")[0];
+  const nombreSinCodigo = configuracionSesionesActual.curso_nombre.slice(codigoCorto.length + 1);
+  const nombreDocenteSesion = nombreDocenteParaSesion();
+
+  filas.forEach((sesion, indice) => {
+    const numeroSesion = String(indice + 1).padStart(2, "0");
+    // 'nombreCorto' es lo que se ve en la columna de la tabla; 'sesion' es
+    // el nombre completo (con curso y docente), reservado para los modales
+    // de "Cambiar" y "Detalle".
+    sesion.nombreCorto = `SESIÓN ${numeroSesion}`;
+    sesion.sesion = `SESIÓN ${numeroSesion} - ${nombreSinCodigo} (${codigoCorto}) - ${nombreDocenteSesion}`;
+  });
+
+  return filas;
+}
+
 function actualizarResaltadoFeriados() {
-  const feriados = new Set(ultimosFeriadosCargados);
-  for (const fila of cuerpoTablaSesiones.querySelectorAll("tr")) {
-    const campoFecha = fila.querySelector('input[type="date"]');
-    if (!campoFecha) continue;
-    fila.classList.toggle("fila-feriado", feriados.has(campoFecha.value));
+  const feriados = new Set(ultimosFeriadosCargados.map((feriado) => feriado.fecha));
+  for (const fila of cuerpoTablaSesiones.querySelectorAll("tr[data-fecha]")) {
+    fila.classList.toggle("fila-feriado", feriados.has(fila.dataset.fecha));
   }
+}
+
+// Dibuja la tabla de "Ver Sesiones" a partir de filasBaseSesionesActuales +
+// reprogramacionesCurso (ya cargadas). Se usa tanto al abrir el modal como
+// después de guardar una reprogramación, sin tener que volver a pedir nada
+// al servidor salvo la reprogramación misma.
+function renderizarTablaSesiones() {
+  cuerpoTablaSesiones.innerHTML = "";
+
+  const filas = aplicarReprogramaciones(filasBaseSesionesActuales, reprogramacionesCurso);
+
+  if (filas.length === 0) {
+    const fila = document.createElement("tr");
+    const celda = document.createElement("td");
+    celda.colSpan = 5;
+    celda.textContent = "No hay sesiones desde el inicio hasta el fin del curso, con el horario configurado.";
+    fila.appendChild(celda);
+    cuerpoTablaSesiones.appendChild(fila);
+    return;
+  }
+
+  for (const sesion of filas) {
+    const fila = document.createElement("tr");
+    fila.dataset.fecha = sesion.fecha;
+    fila.classList.toggle("fila-modificada", sesion.modificado);
+
+    const columnas = [sesion.nombreCorto, formatearFechaCorta(sesion.fecha), sesion.horaInicio, sesion.horaFin];
+    for (const valor of columnas) {
+      const celda = document.createElement("td");
+      celda.textContent = valor;
+      fila.appendChild(celda);
+    }
+
+    const celdaAcciones = document.createElement("td");
+    celdaAcciones.className = "celda-acciones-sesion";
+
+    const botonCambiar = document.createElement("button");
+    botonCambiar.type = "button";
+    botonCambiar.className = "boton-pequeno";
+    botonCambiar.textContent = "Cambiar";
+    botonCambiar.addEventListener("click", () => abrirModalReprogramarSesion(sesion));
+
+    const botonDetalle = document.createElement("button");
+    botonDetalle.type = "button";
+    botonDetalle.className = "boton-pequeno";
+    botonDetalle.textContent = "Detalle";
+    botonDetalle.addEventListener("click", () => abrirModalDetalleSesion(sesion));
+
+    celdaAcciones.append(botonCambiar, botonDetalle);
+    fila.appendChild(celdaAcciones);
+
+    cuerpoTablaSesiones.appendChild(fila);
+  }
+
+  actualizarResaltadoFeriados();
 }
 
 async function abrirVistaSesiones() {
@@ -1635,48 +1824,97 @@ async function abrirVistaSesiones() {
     return;
   }
 
-  const respuestaFeriados = await fetch("/api/feriados");
+  const [respuestaFeriados, respuestaReprogramaciones] = await Promise.all([
+    fetch("/api/feriados"),
+    fetch(`/api/sesiones-dictado/${encodeURIComponent(configuracionSesionesActual.curso_codigo)}/reprogramaciones`),
+  ]);
   const datosFeriados = await respuestaFeriados.json();
-  ultimosFeriadosCargados = datosFeriados.feriados || [];
+  ultimosFeriadosCargados = objetoFeriadosALista(datosFeriados.feriados || {});
+  reprogramacionesCurso = await respuestaReprogramaciones.json();
 
-  const filas = generarFilasSesiones({ ...configuracionSesionesActual, ...fechasCurso });
+  filasBaseSesionesActuales = generarFilasSesiones({ ...configuracionSesionesActual, ...fechasCurso });
 
-  if (filas.length === 0) {
-    const fila = document.createElement("tr");
-    const celda = document.createElement("td");
-    celda.colSpan = 5;
-    celda.textContent = "No hay sesiones desde hoy hasta el fin del curso, con el horario configurado.";
-    fila.appendChild(celda);
-    cuerpoTablaSesiones.appendChild(fila);
-    dialogoVerSesiones.showModal();
-    return;
-  }
-
-  for (const sesion of filas) {
-    const fila = document.createElement("tr");
-    const columnas = [
-      [sesion.nro, "number"],
-      [sesion.sesion, "text"],
-      [sesion.fecha, "date"],
-      [sesion.horaInicio, "time"],
-      [sesion.horaFin, "time"],
-    ];
-
-    for (const [valor, tipo] of columnas) {
-      const celda = document.createElement("td");
-      celda.appendChild(crearCeldaEditable(valor, tipo));
-      fila.appendChild(celda);
-    }
-
-    cuerpoTablaSesiones.appendChild(fila);
-  }
-
-  actualizarResaltadoFeriados();
+  renderizarTablaSesiones();
   dialogoVerSesiones.showModal();
 }
 
 botonVerSesiones.addEventListener("click", abrirVistaSesiones);
 botonCerrarVerSesiones.addEventListener("click", () => dialogoVerSesiones.close());
+
+// --- Reprogramar / ver detalle de una sesión puntual ---
+
+function abrirModalReprogramarSesion(sesion) {
+  sesionReprogramarActual = sesion;
+  nombreSesionReprogramar.textContent = sesion.sesion;
+  campoFechaReprogramada.value = sesion.fecha;
+  campoHoraInicioReprogramada.value = sesion.horaInicio;
+  campoHoraFinReprogramada.value = sesion.horaFin;
+  campoDetalleReprogramada.value = sesion.detalleCambio || "";
+  mensajeReprogramarSesion.textContent = "";
+  dialogoReprogramarSesion.showModal();
+}
+
+async function guardarReprogramacionSesion() {
+  if (!sesionReprogramarActual || !configuracionSesionesActual) {
+    return;
+  }
+
+  const datos = {
+    curso_codigo: configuracionSesionesActual.curso_codigo,
+    fecha_original: sesionReprogramarActual.fechaOriginal,
+    fecha_nueva: campoFechaReprogramada.value,
+    hora_inicio: campoHoraInicioReprogramada.value,
+    hora_fin: campoHoraFinReprogramada.value,
+    detalle: campoDetalleReprogramada.value.trim(),
+  };
+
+  if (!datos.fecha_nueva || !datos.hora_inicio || !datos.hora_fin) {
+    mensajeReprogramarSesion.textContent = "Completa la fecha y las horas.";
+    return;
+  }
+
+  if (!datos.detalle) {
+    mensajeReprogramarSesion.textContent = "Indica el detalle (motivo) del cambio.";
+    return;
+  }
+
+  if (datos.hora_fin <= datos.hora_inicio) {
+    mensajeReprogramarSesion.textContent = "La hora de fin debe ser posterior a la de inicio.";
+    return;
+  }
+
+  botonGuardarReprogramarSesion.disabled = true;
+  const respuesta = await fetch("/api/sesiones-dictado/reprogramar", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(datos),
+  });
+  const resultado = await respuesta.json();
+  botonGuardarReprogramarSesion.disabled = false;
+
+  if (resultado.estado !== "ok") {
+    mensajeReprogramarSesion.textContent = resultado.error || "No se pudo guardar la reprogramación.";
+    return;
+  }
+
+  reprogramacionesCurso = resultado.reprogramaciones;
+  dialogoReprogramarSesion.close();
+  renderizarTablaSesiones();
+}
+
+botonGuardarReprogramarSesion.addEventListener("click", guardarReprogramacionSesion);
+botonCancelarReprogramarSesion.addEventListener("click", () => dialogoReprogramarSesion.close());
+
+function abrirModalDetalleSesion(sesion) {
+  nombreSesionDetalle.textContent = sesion.sesion;
+  detalleFechaOriginal.textContent = formatearFechaCorta(sesion.fechaOriginal);
+  detalleHoraOriginal.textContent = `${sesion.horaInicioOriginal} - ${sesion.horaFinOriginal}`;
+  detalleMotivoCambioFila.classList.toggle("oculto", !sesion.modificado);
+  detalleMotivoCambio.textContent = sesion.detalleCambio || "";
+  dialogoDetalleSesion.showModal();
+}
+
+botonCerrarDetalleSesion.addEventListener("click", () => dialogoDetalleSesion.close());
 
 // --- Feriados ---
 // Lista editable (agregar/quitar) usada para marcar en rojo las sesiones
@@ -1685,7 +1923,7 @@ botonCerrarVerSesiones.addEventListener("click", () => dialogoVerSesiones.close(
 
 function renderizarListaFeriados(feriados) {
   listaFeriados.innerHTML = "";
-  const ordenados = [...feriados].sort();
+  const ordenados = ordenarFeriados(feriados);
 
   if (ordenados.length === 0) {
     const item = document.createElement("li");
@@ -1694,58 +1932,85 @@ function renderizarListaFeriados(feriados) {
     return;
   }
 
-  for (const fecha of ordenados) {
+  for (const feriado of ordenados) {
     const item = document.createElement("li");
 
-    const texto = document.createElement("span");
-    texto.textContent = fecha;
+    const info = document.createElement("span");
+    info.className = "info-feriado";
+
+    const fecha = document.createElement("span");
+    fecha.className = "fecha-feriado";
+    fecha.textContent = formatearFechaCorta(feriado.fecha);
+
+    const motivo = document.createElement("span");
+    motivo.className = "motivo-feriado";
+    motivo.textContent = feriado.motivo || "Sin motivo indicado";
+
+    info.append(fecha, motivo);
 
     const botonQuitar = document.createElement("button");
     botonQuitar.type = "button";
     botonQuitar.className = "boton-quitar-feriado";
     botonQuitar.textContent = "Quitar";
-    botonQuitar.addEventListener("click", () => quitarFeriado(fecha));
+    botonQuitar.addEventListener("click", () => quitarFeriado(feriado.fecha));
 
-    item.append(texto, botonQuitar);
+    item.append(info, botonQuitar);
     listaFeriados.appendChild(item);
   }
 }
 
 async function guardarListaFeriados(feriados) {
+  const objeto = {};
+  for (const feriado of feriados) {
+    objeto[feriado.fecha] = feriado.motivo || "";
+  }
+
   const respuesta = await fetch("/api/feriados", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ feriados }),
+    body: JSON.stringify({ feriados: objeto }),
   });
   const resultado = await respuesta.json();
-  ultimosFeriadosCargados = resultado.feriados || [];
+  ultimosFeriadosCargados = objetoFeriadosALista(resultado.feriados || {});
   renderizarListaFeriados(ultimosFeriadosCargados);
 }
 
 function quitarFeriado(fecha) {
-  guardarListaFeriados(ultimosFeriadosCargados.filter((f) => f !== fecha));
+  guardarListaFeriados(ultimosFeriadosCargados.filter((feriado) => feriado.fecha !== fecha));
 }
 
 function agregarFeriado() {
   const fecha = campoNuevoFeriado.value;
-  if (!fecha) {
+  const motivo = campoMotivoNuevoFeriado.value.trim();
+  mensajeFeriados.textContent = "";
+
+  if (!fecha || !motivo) {
+    mensajeFeriados.textContent = "Completa la fecha y el motivo antes de agregar.";
     return;
   }
-  if (!ultimosFeriadosCargados.includes(fecha)) {
-    guardarListaFeriados([...ultimosFeriadosCargados, fecha]);
-  }
+
+  // Si la fecha ya estaba en la lista, esto reemplaza su motivo en vez de
+  // duplicarla.
+  const sinEsaFecha = ultimosFeriadosCargados.filter((feriado) => feriado.fecha !== fecha);
+  guardarListaFeriados([...sinEsaFecha, { fecha, motivo }]);
+
   campoNuevoFeriado.value = "";
+  campoMotivoNuevoFeriado.value = "";
 }
 
 async function abrirFeriados() {
   const respuesta = await fetch("/api/feriados");
   const datos = await respuesta.json();
-  ultimosFeriadosCargados = datos.feriados || [];
+  ultimosFeriadosCargados = objetoFeriadosALista(datos.feriados || {});
+  mensajeFeriados.textContent = "";
   renderizarListaFeriados(ultimosFeriadosCargados);
   dialogoFeriados.showModal();
 }
 
 botonAbrirFeriados.addEventListener("click", abrirFeriados);
+// Mismo modal, accesible también directo desde la lista de Herramientas,
+// sin tener que pasar por "Generar Sesiones Dictado" > "Ver Sesiones".
+botonAbrirFeriadosTool.addEventListener("click", abrirFeriados);
 botonAgregarFeriado.addEventListener("click", agregarFeriado);
 botonCerrarFeriados.addEventListener("click", () => {
   dialogoFeriados.close();

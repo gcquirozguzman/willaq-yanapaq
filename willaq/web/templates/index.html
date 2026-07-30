@@ -109,6 +109,16 @@
             </div>
             <button id="boton-generar-plantilla" class="boton-pequeno" type="button" disabled>Generar</button>
           </li>
+          <li id="item-feriados" class="item-herramienta">
+            <div class="icono-herramienta">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22V15"/></svg>
+            </div>
+            <div>
+              <p class="nombre-herramienta">Feriados</p>
+              <p class="estado-herramienta">Disponible</p>
+            </div>
+            <button id="boton-abrir-feriados-tool" class="boton-pequeno" type="button">Editar</button>
+          </li>
           <li id="item-sesiones-dictado" class="item-herramienta bloqueada">
             <div class="icono-herramienta">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18"/><path d="M8 2v4M16 2v4"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></svg>
@@ -365,8 +375,8 @@
       <div id="tabla-horario-semanal" class="tabla-horario-semanal"></div>
 
       <p class="descripcion-dialogo">
-        Las sesiones de dictado se generarán <strong>solo desde la fecha actual en adelante</strong>,
-        aunque el curso ya haya empezado antes.
+        Las sesiones de dictado se generarán <strong>desde la fecha de inicio del curso</strong>
+        hasta su fecha de fin.
       </p>
 
       <p id="mensaje-asistente-sesiones" class="mensaje-cursos"></p>
@@ -404,18 +414,19 @@
     <div class="dialogo-contenido">
       <h2>Sesiones de dictado</h2>
       <p class="descripcion-dialogo">
-        Se muestran desde hoy hasta el fin del curso. Las filas en rojo caen en un feriado.
+        Se muestran desde el inicio hasta el fin del curso. Las filas en rojo caen en un feriado;
+        las filas en amarillo fueron reprogramadas (usa "Detalle" para ver su fecha y hora original).
       </p>
 
       <div class="tabla-scroll">
         <table class="tabla-anuncios">
           <thead>
             <tr>
-              <th>Nro</th>
               <th>Sesión</th>
               <th>Fecha</th>
               <th>Hora inicio</th>
               <th>Hora fin</th>
+              <th>Acciones</th>
             </tr>
           </thead>
           <tbody id="cuerpo-tabla-sesiones"></tbody>
@@ -429,23 +440,73 @@
     </div>
   </dialog>
 
+  <dialog id="dialogo-reprogramar-sesion" class="dialogo">
+    <div class="dialogo-contenido">
+      <h2>Reprogramar sesión</h2>
+      <p class="descripcion-dialogo" id="nombre-sesion-reprogramar"></p>
+
+      <label class="campo">
+        Nueva fecha
+        <input type="date" id="campo-fecha-reprogramada" required>
+      </label>
+      <label class="campo">
+        Nueva hora de inicio
+        <input type="time" id="campo-hora-inicio-reprogramada" required>
+      </label>
+      <label class="campo">
+        Nueva hora de fin
+        <input type="time" id="campo-hora-fin-reprogramada" required>
+      </label>
+      <label class="campo">
+        Detalle (motivo del cambio)
+        <textarea id="campo-detalle-reprogramada" rows="3" required></textarea>
+      </label>
+
+      <p id="mensaje-reprogramar-sesion" class="mensaje-cursos"></p>
+
+      <div class="botonera">
+        <button type="button" id="boton-guardar-reprogramar-sesion" class="boton boton-primario">Guardar</button>
+        <button type="button" id="boton-cancelar-reprogramar-sesion" class="boton boton-secundario">Cancelar</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="dialogo-detalle-sesion" class="dialogo">
+    <div class="dialogo-contenido">
+      <h2>Detalle de la sesión</h2>
+      <p class="descripcion-dialogo" id="nombre-sesion-detalle"></p>
+      <p><strong>Fecha original:</strong> <span id="detalle-fecha-original"></span></p>
+      <p><strong>Hora original:</strong> <span id="detalle-hora-original"></span></p>
+      <p id="detalle-motivo-cambio-fila"><strong>Motivo del cambio:</strong> <span id="detalle-motivo-cambio"></span></p>
+      <div class="botonera botonera-centrada">
+        <button type="button" id="boton-cerrar-detalle-sesion" class="boton boton-secundario">Cerrar</button>
+      </div>
+    </div>
+  </dialog>
+
   <dialog id="dialogo-feriados" class="dialogo">
     <div class="dialogo-contenido">
       <h2>Feriados</h2>
       <p class="descripcion-dialogo">
-        Feriados considerados para marcar en rojo las sesiones de dictado.
-        Puedes agregar o quitar fechas; los cambios se guardan de inmediato.
+        Feriados del año, con el motivo de cada fecha, considerados para marcar en rojo las
+        sesiones de dictado. Siempre se muestran ordenados por fecha. Puedes agregar o quitar
+        fechas; los cambios se guardan de inmediato.
       </p>
 
       <ul id="lista-feriados" class="lista-feriados"></ul>
 
       <div class="fila-campos fila-campos-alineada-abajo">
         <label class="campo">
-          <span class="etiqueta-campo">Agregar feriado</span>
+          <span class="etiqueta-campo">Fecha</span>
           <input type="date" id="campo-nuevo-feriado">
+        </label>
+        <label class="campo">
+          <span class="etiqueta-campo">Motivo</span>
+          <input type="text" id="campo-motivo-nuevo-feriado" placeholder="Ej. Aniversario de Cibertec">
         </label>
         <button type="button" id="boton-agregar-feriado" class="boton boton-secundario">Agregar</button>
       </div>
+      <p id="mensaje-feriados" class="mensaje-cursos"></p>
 
       <div class="botonera">
         <button type="button" id="boton-cerrar-feriados" class="boton boton-primario">Cerrar</button>

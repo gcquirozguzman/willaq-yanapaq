@@ -528,22 +528,24 @@ html[data-tema="oscuro"] .logo-claro {
   line-height: 1.5;
 }
 
-.fechas-curso {
+.fechas-curso,
+.horario-curso {
   display: block;
   margin-top: 8px;
   font-size: 0.78rem;
   color: var(--texto-tenue);
 }
 
-.fechas-curso.sin-configurar {
+.fechas-curso.sin-configurar,
+.horario-curso.sin-configurar {
   color: var(--aviso);
   font-weight: 600;
 }
 
-.boton-fechas-curso {
+.boton-accion-curso {
   display: block;
   width: 100%;
-  margin-top: 10px;
+  margin-top: 8px;
   background-color: var(--fondo-tarjeta-alt);
   color: var(--acento);
   border: 1px solid var(--borde);
@@ -554,8 +556,13 @@ html[data-tema="oscuro"] .logo-claro {
   cursor: pointer;
 }
 
-.boton-fechas-curso:hover {
+.boton-accion-curso:hover {
   border-color: var(--acento);
+}
+
+.boton-accion-curso:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .mensaje-cursos {
@@ -607,7 +614,8 @@ html[data-tema="oscuro"] .logo-claro {
 }
 
 .campo select,
-.campo input {
+.campo input,
+.campo textarea {
   font-family: inherit;
   font-size: 0.95rem;
   font-weight: 400;
@@ -616,6 +624,10 @@ html[data-tema="oscuro"] .logo-claro {
   border: 1px solid var(--borde);
   background-color: var(--fondo-tarjeta-alt);
   color: var(--texto);
+}
+
+.campo textarea {
+  resize: vertical;
 }
 
 .fila-campos {
@@ -811,11 +823,47 @@ html[data-tema="oscuro"] .logo-claro {
 
 .fila-feriado td {
   background-color: rgba(252, 31, 41, 0.12);
+  color: var(--error);
 }
 
-.fila-feriado .celda-editable {
-  color: var(--error);
-  font-weight: 600;
+/* --- Sesiones de dictado: filas reprogramadas manualmente ---
+   Va después de .fila-feriado para que, si una sesión reprogramada cae
+   además en feriado, gane el amarillo (es la información más específica:
+   "esta sesión ya no es la fecha original"). */
+
+.fila-modificada td {
+  background-color: rgba(224, 160, 32, 0.22);
+  color: var(--texto);
+}
+
+.celda-acciones-sesion {
+  display: flex;
+  gap: 6px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  justify-content: center;
+}
+
+#dialogo-ver-sesiones .tabla-anuncios th,
+#dialogo-ver-sesiones .tabla-anuncios td {
+  text-align: center;
+}
+
+/* Se adapta al ancho real de la tabla (que ahora es angosta, con la
+   columna "Sesión" acortada a "SESIÓN 01") en vez de forzar un ancho fijo
+   que deje espacio vacío de sobra; el max-width solo evita que se salga
+   de la pantalla si la tabla llegara a ser más ancha. */
+#dialogo-ver-sesiones {
+  width: fit-content;
+  min-width: min(640px, 92vw);
+  max-width: min(1000px, 92vw);
+}
+
+/* Sin este límite, el texto largo de la descripción (sin saltos de línea
+   propios) sería lo más ancho del diálogo y anularía el ajuste anterior:
+   el navegador mediría el diálogo como si esa frase fuera una sola línea. */
+#dialogo-ver-sesiones .descripcion-dialogo {
+  max-width: 480px;
 }
 
 /* --- Feriados --- */
@@ -827,7 +875,7 @@ html[data-tema="oscuro"] .logo-claro {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-height: 240px;
+  max-height: 280px;
   overflow-y: auto;
 }
 
@@ -836,12 +884,29 @@ html[data-tema="oscuro"] .logo-claro {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 0;
+  padding: 8px 0;
   font-size: 0.85rem;
 }
 
 .lista-feriados li:not(:last-child) {
   border-bottom: 1px solid var(--borde);
+}
+
+.info-feriado {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fecha-feriado {
+  font-family: "Menlo", "Consolas", monospace;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.motivo-feriado {
+  font-size: 0.78rem;
+  color: var(--texto-tenue);
 }
 
 .lista-feriados .boton-quitar-feriado {
@@ -852,6 +917,7 @@ html[data-tema="oscuro"] .logo-claro {
   font-size: 0.8rem;
   font-weight: 600;
   padding: 2px 8px;
+  white-space: nowrap;
 }
 
 .fila-campos.fila-campos-alineada-abajo {

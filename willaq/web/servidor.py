@@ -38,9 +38,15 @@ from willaq.cursos.fechas import (
 )
 from willaq.cursos.listar import cargar_cursos_guardados, obtener_cursos_activos
 from willaq.dictado.feriados import guardar_feriados, obtener_feriados
+from willaq.dictado.reprogramaciones import (
+    guardar_reprogramacion,
+    obtener_reprogramaciones_curso,
+    reiniciar_configuraciones as reiniciar_reprogramaciones,
+)
 from willaq.dictado.sesiones import (
     guardar_configuracion_sesiones,
     obtener_configuracion_sesiones,
+    obtener_todas_las_configuraciones as obtener_todas_las_sesiones,
     reiniciar_configuraciones as reiniciar_sesiones_dictado,
 )
 from willaq.web.estado import estado_cursos, estado_login
@@ -135,6 +141,20 @@ def crear_app() -> Flask:
     def consultar_sesiones_dictado_web(codigo_curso):
         return jsonify(obtener_configuracion_sesiones(codigo_curso) or {})
 
+    @app.get("/api/sesiones-dictado")
+    def consultar_todas_las_sesiones_dictado_web():
+        return jsonify(obtener_todas_las_sesiones())
+
+    @app.get("/api/sesiones-dictado/<codigo_curso>/reprogramaciones")
+    def consultar_reprogramaciones_web(codigo_curso):
+        return jsonify(obtener_reprogramaciones_curso(codigo_curso))
+
+    @app.post("/api/sesiones-dictado/reprogramar")
+    def guardar_reprogramacion_web():
+        datos = request.get_json(silent=True) or {}
+        resultado = guardar_reprogramacion(datos)
+        return jsonify(resultado)
+
     @app.get("/api/feriados")
     def consultar_feriados_web():
         return jsonify({"feriados": obtener_feriados()})
@@ -142,7 +162,7 @@ def crear_app() -> Flask:
     @app.post("/api/feriados")
     def guardar_feriados_web():
         datos = request.get_json(silent=True) or {}
-        resultado = guardar_feriados(datos.get("feriados") or [])
+        resultado = guardar_feriados(datos.get("feriados") or {})
         return jsonify(resultado)
 
     @app.get("/api/cursos/fechas")
@@ -231,6 +251,7 @@ def _obtener_cursos_en_hilo():
             reiniciar_fechas_cursos()
             reiniciar_anuncios_semanales()
             reiniciar_sesiones_dictado()
+            reiniciar_reprogramaciones()
             notificar("Se reinició la configuración de fechas de curso, Anuncios Semanales y Sesiones Dictado.")
         guardado = cargar_cursos_guardados()
         obtenido_en = guardado.get("obtenido_en") if guardado else None
