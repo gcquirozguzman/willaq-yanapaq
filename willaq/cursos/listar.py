@@ -14,6 +14,7 @@ Todo esto se confirmó con el HTML real de la página.
 """
 
 import json
+from datetime import datetime
 
 from playwright.sync_api import sync_playwright
 
@@ -38,7 +39,11 @@ RUTA_CURSOS_GUARDADOS = DIR_DATOS / "cursos_activos.json"
 def _guardar_cursos_obtenidos(cursos: list):
     try:
         DIR_DATOS.mkdir(parents=True, exist_ok=True)
-        RUTA_CURSOS_GUARDADOS.write_text(json.dumps(cursos), encoding="utf-8")
+        contenido = {
+            "cursos": cursos,
+            "obtenido_en": datetime.now().isoformat(timespec="seconds"),
+        }
+        RUTA_CURSOS_GUARDADOS.write_text(json.dumps(contenido), encoding="utf-8")
     except Exception:
         pass  # esto es solo una comodidad de la interfaz; si falla, no afecta la búsqueda
 
@@ -46,12 +51,18 @@ def _guardar_cursos_obtenidos(cursos: list):
 def cargar_cursos_guardados():
     """Lee la última lista de cursos activos guardada en disco, si existe.
 
-    Devuelve None si nunca se guardó nada (por ejemplo, primera vez que se
-    usa la herramienta).
+    Devuelve {"cursos": [...], "obtenido_en": "YYYY-MM-DDTHH:MM:SS"}, o None
+    si nunca se guardó nada (por ejemplo, primera vez que se usa la
+    herramienta). Los archivos guardados por una versión anterior de esta
+    función (una lista plana, sin fecha) también se leen bien, solo que sin
+    "obtenido_en".
     """
     try:
         if RUTA_CURSOS_GUARDADOS.exists():
-            return json.loads(RUTA_CURSOS_GUARDADOS.read_text(encoding="utf-8"))
+            datos = json.loads(RUTA_CURSOS_GUARDADOS.read_text(encoding="utf-8"))
+            if isinstance(datos, list):
+                return {"cursos": datos, "obtenido_en": None}
+            return datos
     except Exception:
         pass
     return None
@@ -63,15 +74,22 @@ SELECTOR_NOMBRE_CURSO = "h4.js-course-title-element"
 SELECTOR_ESTADO_ABIERTO = 'span[bb-translate="base.courses.open"]'
 
 
-def _extraer_cursos_activos(pagina, notificar) -> list:
-    """Lee las tarjetas de curso de la página y devuelve solo los activos."""
+def _extraer_cursos_activos(pagina, notificar):
+    """Lee las tarjetas de curso de la página y devuelve solo los activos.
+
+    Devuelve None (no una lista vacía) si la página de cursos no llegó a
+    cargar a tiempo. Esta distinción importa: una lista vacía "de verdad"
+    significa que el docente no tiene cursos activos, mientras que None es
+    un fallo transitorio (timeout, red lenta) que NO debe sobrescribir la
+    última lista buena guardada en disco.
+    """
     cursos = []
 
     try:
         pagina.locator(SELECTOR_TARJETA_CURSO).first.wait_for(timeout=15_000)
     except Exception as error:
         notificar(f"[AVISO] No se pudo cargar la lista de cursos: {error}")
-        return cursos
+        return None
 
     tarjetas = pagina.locator(SELECTOR_TARJETA_CURSO)
     for indice in range(tarjetas.count()):
@@ -81,20 +99,36 @@ def _extraer_cursos_activos(pagina, notificar) -> list:
                 continue  # no dice "Abierto" (está finalizado, etc.): se descarta
             codigo = tarjeta.locator(SELECTOR_CODIGO_CURSO).inner_text(timeout=2_000).strip()
             nombre = tarjeta.locator(SELECTOR_NOMBRE_CURSO).inner_text(timeout=2_000).strip()
-            cursos.append({"codigo": codigo, "nombre": nombre})
+            # El atributo "data-course-id" (ej. "_1460705_1") es el identificador
+            # interno que Blackboard usa en las URLs del curso (por ejemplo, para
+            # llegar directo a /ultra/courses/<id>/announcements). Confirmado
+            # navegando de verdad: el link de la tarjeta no cambia la URL visible
+            # (usa ruteo interno de Angular), pero este ID sí sirve para navegar
+            # directo con page.goto().
+            id_curso = tarjeta.get_attribute("data-course-id")
+            cursos.append({"codigo": codigo, "nombre": nombre, "id": id_curso})
         except Exception:
             continue  # si una tarjeta puntual falla al leerse, seguimos con las demás
 
     return cursos
 
 
-def obtener_cursos_activos(notificar=None) -> list:
+def obtener_cursos_activos(notificar=None, info_actualizacion=None) -> list:
     """Abre el navegador, va a la lista de cursos y devuelve los activos.
 
     Requiere que ya exista una sesión guardada (ejecutar 'login' antes). Si
     no hay sesión activa, avisa por qué y devuelve una lista vacía.
+
+    Si se pasa 'info_actualizacion' (un diccionario), se le agrega la clave
+    "actualizado": True solo cuando se obtuvo y guardó una lista nueva de
+    verdad (no cuando se devolvió la lista guardada previamente por un fallo
+    o por falta de sesión). El panel web usa esto para decidir si debe
+    reiniciar la configuración de Anuncios Semanales y Sesiones Dictado, ya
+    que ambas dependen de la lista de cursos vigente.
     """
     notificar = notificar or print
+    if info_actualizacion is not None:
+        info_actualizacion["actualizado"] = False
 
     notificar("Buscando tus cursos activos en Blackboard...")
 
@@ -121,8 +155,19 @@ def obtener_cursos_activos(notificar=None) -> list:
         _esperar_carga_de_pagina(pagina)
 
         cursos = _extraer_cursos_activos(pagina, notificar)
-        notificar(f"Se encontraron {len(cursos)} curso(s) activo(s).")
-        _guardar_cursos_obtenidos(cursos)
+        if cursos is None:
+            # Fallo transitorio al cargar la página: se mantiene la última
+            # lista buena guardada en vez de reemplazarla por una vacía, para
+            # no bloquear en el panel herramientas que ya estaban disponibles
+            # (Generar Anuncios Semanales, Generar Sesiones Dictado, etc.).
+            notificar("[AVISO] Se mantiene la última lista de cursos guardada; no se pudo actualizar.")
+            guardado = cargar_cursos_guardados()
+            cursos = guardado["cursos"] if guardado else []
+        else:
+            notificar(f"Se encontraron {len(cursos)} curso(s) activo(s).")
+            _guardar_cursos_obtenidos(cursos)
+            if info_actualizacion is not None:
+                info_actualizacion["actualizado"] = True
 
         contexto.close()
 

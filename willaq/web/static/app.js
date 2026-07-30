@@ -44,13 +44,15 @@ const etiquetaEstadoLogin = document.getElementById("etiqueta-estado-login");
 const identidadDocente = document.getElementById("identidad-docente");
 const avatarDocente = document.getElementById("avatar-docente");
 const nombreDocenteEl = document.getElementById("nombre-docente");
-const tarjetaSesion = document.getElementById("tarjeta-sesion");
 const cargando = document.getElementById("cargando");
 const textoCargando = document.getElementById("texto-cargando");
 const itemPlantilla = document.getElementById("item-plantilla");
 const estadoPlantilla = document.getElementById("estado-plantilla");
 const botonGenerarPlantilla = document.getElementById("boton-generar-plantilla");
 const botonVerAnuncios = document.getElementById("boton-ver-anuncios");
+const itemSesionesDictado = document.getElementById("item-sesiones-dictado");
+const estadoSesionesDictado = document.getElementById("estado-sesiones-dictado");
+const botonGenerarSesionesDictado = document.getElementById("boton-generar-sesiones-dictado");
 const itemCursos = document.getElementById("item-cursos");
 const estadoCursosEl = document.getElementById("estado-cursos");
 const botonObtenerCursos = document.getElementById("boton-obtener-cursos");
@@ -174,11 +176,15 @@ function actualizarCargando(estado) {
   }
 }
 
-function actualizarIdentidadDocente(estado, sesionActiva) {
-  tarjetaSesion.classList.toggle("oculto", !sesionActiva);
+// Nombre real del docente, detectado en el login de Blackboard (ver
+// login.py). Se usa, por ejemplo, para firmar los mensajes de los anuncios
+// semanales en vez de tener un nombre fijo.
+let nombreDocenteActual = null;
 
+function actualizarIdentidadDocente(estado, sesionActiva) {
   if (sesionActiva && estado.nombre_docente) {
     nombreDocenteEl.textContent = estado.nombre_docente;
+    nombreDocenteActual = estado.nombre_docente;
     identidadDocente.classList.remove("oculto");
   } else {
     identidadDocente.classList.add("oculto");
@@ -197,6 +203,22 @@ function actualizarIdentidadDocente(estado, sesionActiva) {
 // Semanales" se desbloquea en base a esto, no solo con tener sesión.
 let cursosObtenidos = [];
 
+// Fechas de inicio/fin configuradas por curso (botón "Configurar fechas" /
+// "Editar fechas" en cada tarjeta de "Cursos activos"). "Generar Anuncios
+// Semanales" y "Generar Sesiones Dictado" ya no piden estas fechas en sus
+// propios formularios: las leen de aquí, y además permanecen bloqueadas
+// hasta que al menos un curso tenga sus fechas configuradas.
+let cursosFechas = {};
+
+async function cargarCursosFechas() {
+  const respuesta = await fetch("/api/cursos/fechas");
+  cursosFechas = await respuesta.json();
+}
+
+function hayCursoConFechas() {
+  return cursosObtenidos.some((curso) => cursosFechas[curso.codigo]);
+}
+
 function actualizarBloqueoHerramientas(sesionActiva) {
   botonObtenerCursos.disabled = !sesionActiva;
   itemCursos.classList.toggle("bloqueada", !sesionActiva);
@@ -207,13 +229,31 @@ function actualizarBloqueoHerramientas(sesionActiva) {
   }
 
   actualizarBloqueoPlantilla();
+  actualizarBloqueoSesionesDictado();
 }
 
 function actualizarBloqueoPlantilla() {
   const hayCursos = cursosObtenidos.length > 0;
-  botonGenerarPlantilla.disabled = !hayCursos;
-  itemPlantilla.classList.toggle("bloqueada", !hayCursos);
-  estadoPlantilla.textContent = hayCursos ? "Disponible" : "Obtén tus cursos primero";
+  const disponible = hayCursos && hayCursoConFechas();
+  botonGenerarPlantilla.disabled = !disponible;
+  itemPlantilla.classList.toggle("bloqueada", !disponible);
+  estadoPlantilla.textContent = !hayCursos
+    ? "Obtén tus cursos primero"
+    : !disponible
+      ? "Configura las fechas de un curso primero"
+      : "Disponible";
+}
+
+function actualizarBloqueoSesionesDictado() {
+  const hayCursos = cursosObtenidos.length > 0;
+  const disponible = hayCursos && hayCursoConFechas();
+  botonGenerarSesionesDictado.disabled = !disponible;
+  itemSesionesDictado.classList.toggle("bloqueada", !disponible);
+  estadoSesionesDictado.textContent = !hayCursos
+    ? "Obtén tus cursos primero"
+    : !disponible
+      ? "Configura las fechas de un curso primero"
+      : "Disponible";
 }
 
 // Consulta el estado una vez al cargar la página, por si ya se había hecho
@@ -243,8 +283,6 @@ botonConfirmarCierre.addEventListener("click", confirmarCierre);
 
 const dialogoAnuncios = document.getElementById("dialogo-anuncios-semanales");
 const campoCurso = document.getElementById("campo-curso");
-const campoFechaInicio = document.getElementById("campo-fecha-inicio");
-const campoFechaFin = document.getElementById("campo-fecha-fin");
 const campoDiaInicio = document.getElementById("campo-dia-inicio");
 const campoHoraInicio = document.getElementById("campo-hora-inicio");
 const campoDiaFin = document.getElementById("campo-dia-fin");
@@ -254,6 +292,10 @@ const botonGuardarAnuncios = document.getElementById("boton-guardar-anuncios-sem
 const botonCancelarAnuncios = document.getElementById("boton-cancelar-anuncios-semanales");
 const campoConfirmarFechaPasada = document.getElementById("campo-confirmar-fecha-pasada");
 const casillaConfirmarFechaPasada = document.getElementById("casilla-confirmar-fecha-pasada");
+const campoRegularizarFechaManual = document.getElementById("campo-regularizar-fecha-manual");
+const casillaRegularizarFechaManual = document.getElementById("casilla-regularizar-fecha-manual");
+const campoFechaRegularizacionManual = document.getElementById("campo-fecha-regularizacion-manual");
+const campoFechaRegularizacion = document.getElementById("campo-fecha-regularizacion");
 const casillaEliminarAnunciosExistentes = document.getElementById("casilla-eliminar-anuncios-existentes");
 const dialogoGuardadoOk = document.getElementById("dialogo-guardado-ok");
 const botonCerrarGuardadoOk = document.getElementById("boton-cerrar-guardado-ok");
@@ -262,8 +304,6 @@ const DIAS_SEMANA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sáb
 const CAMPOS_REQUERIDOS_ANUNCIOS = [
   "curso_codigo",
   "curso_nombre",
-  "fecha_inicio_curso",
-  "fecha_fin_curso",
   "dia_inicio_semana",
   "hora_inicio_semana",
   "dia_fin_semana",
@@ -278,17 +318,44 @@ function fechaHoyISO() {
   return local.toISOString().slice(0, 10);
 }
 
-// La casilla "igual deseo agregar anuncios..." solo tiene sentido (y solo se
-// muestra) cuando la fecha de inicio elegida ya pasó.
+// Las casillas de "regularizar" (desde el inicio real del curso, o desde
+// una fecha manual) solo tienen sentido -y solo se muestran- cuando la
+// fecha de inicio del curso elegido (ver cursosFechas, cargada desde
+// "Cursos activos") ya pasó. Son mutuamente excluyentes: solo una puede
+// estar marcada a la vez.
 function actualizarVisibilidadCasillaFechaPasada() {
-  const fechaPasada = Boolean(campoFechaInicio.value) && campoFechaInicio.value < fechaHoyISO();
+  const fechasCurso = cursosFechas[campoCurso.value];
+  const fechaInicioCurso = fechasCurso ? fechasCurso.fecha_inicio_curso : "";
+  const fechaPasada = Boolean(fechaInicioCurso) && fechaInicioCurso < fechaHoyISO();
   campoConfirmarFechaPasada.classList.toggle("oculto", !fechaPasada);
+  campoRegularizarFechaManual.classList.toggle("oculto", !fechaPasada);
   if (!fechaPasada) {
     casillaConfirmarFechaPasada.checked = false;
+    casillaRegularizarFechaManual.checked = false;
+  }
+  actualizarVisibilidadFechaRegularizacionManual();
+}
+
+function actualizarVisibilidadFechaRegularizacionManual() {
+  campoFechaRegularizacionManual.classList.toggle("oculto", !casillaRegularizarFechaManual.checked);
+  if (!casillaRegularizarFechaManual.checked) {
+    campoFechaRegularizacion.value = "";
   }
 }
 
-campoFechaInicio.addEventListener("change", actualizarVisibilidadCasillaFechaPasada);
+casillaConfirmarFechaPasada.addEventListener("change", () => {
+  if (casillaConfirmarFechaPasada.checked) {
+    casillaRegularizarFechaManual.checked = false;
+    actualizarVisibilidadFechaRegularizacionManual();
+  }
+});
+
+casillaRegularizarFechaManual.addEventListener("change", () => {
+  if (casillaRegularizarFechaManual.checked) {
+    casillaConfirmarFechaPasada.checked = false;
+  }
+  actualizarVisibilidadFechaRegularizacionManual();
+});
 
 function llenarSelectDeDias(select) {
   select.innerHTML = "";
@@ -322,13 +389,13 @@ async function precargarConfiguracionGuardada(codigoCurso) {
     }
   }
 
-  campoFechaInicio.value = configuracion ? configuracion.fecha_inicio_curso : "";
-  campoFechaFin.value = configuracion ? configuracion.fecha_fin_curso : "";
   campoDiaInicio.value = configuracion ? configuracion.dia_inicio_semana : campoDiaInicio.options[0].value;
   campoHoraInicio.value = configuracion ? configuracion.hora_inicio_semana : "";
   campoDiaFin.value = configuracion ? configuracion.dia_fin_semana : campoDiaFin.options[0].value;
   campoHoraFin.value = configuracion ? configuracion.hora_fin_semana : "";
   casillaConfirmarFechaPasada.checked = configuracion ? Boolean(configuracion.confirmar_fecha_pasada) : false;
+  casillaRegularizarFechaManual.checked = configuracion ? Boolean(configuracion.regularizar_fecha_manual) : false;
+  campoFechaRegularizacion.value = configuracion ? configuracion.fecha_regularizacion_manual || "" : "";
   casillaEliminarAnunciosExistentes.checked = configuracion ? Boolean(configuracion.eliminar_anuncios_existentes) : false;
 
   actualizarVisibilidadCasillaFechaPasada();
@@ -341,7 +408,10 @@ async function precargarConfiguracionGuardada(codigoCurso) {
 
 function abrirAsistenteAnuncios() {
   campoCurso.innerHTML = "";
+  // Solo se listan los cursos que ya tienen fecha de inicio/fin configurada
+  // desde "Cursos activos": este asistente ya no las pide.
   for (const curso of cursosObtenidos) {
+    if (!cursosFechas[curso.codigo]) continue;
     const opcion = document.createElement("option");
     opcion.value = curso.codigo;
     opcion.textContent = curso.nombre;
@@ -351,6 +421,7 @@ function abrirAsistenteAnuncios() {
   mensajeAsistenteAnuncios.textContent = "";
   botonVerAnuncios.disabled = true;
   precargarConfiguracionGuardada(campoCurso.value);
+  actualizarVisibilidadCasillaFechaPasada();
   dialogoAnuncios.showModal();
 }
 
@@ -365,24 +436,19 @@ async function guardarAnunciosSemanales() {
   const datos = {
     curso_codigo: campoCurso.value,
     curso_nombre: cursoSeleccionado ? cursoSeleccionado.nombre : "",
-    fecha_inicio_curso: campoFechaInicio.value,
-    fecha_fin_curso: campoFechaFin.value,
     dia_inicio_semana: campoDiaInicio.value,
     hora_inicio_semana: campoHoraInicio.value,
     dia_fin_semana: campoDiaFin.value,
     hora_fin_semana: campoHoraFin.value,
     confirmar_fecha_pasada: casillaConfirmarFechaPasada.checked,
+    regularizar_fecha_manual: casillaRegularizarFechaManual.checked,
+    fecha_regularizacion_manual: campoFechaRegularizacion.value,
     eliminar_anuncios_existentes: casillaEliminarAnunciosExistentes.checked,
   };
 
   const faltaAlgo = CAMPOS_REQUERIDOS_ANUNCIOS.some((campo) => !datos[campo]);
   if (faltaAlgo) {
     mensajeAsistenteAnuncios.textContent = "Completa todos los campos antes de guardar.";
-    return;
-  }
-
-  if (datos.fecha_inicio_curso >= datos.fecha_fin_curso) {
-    mensajeAsistenteAnuncios.textContent = "La fecha de inicio del curso debe ser anterior a la fecha de fin.";
     return;
   }
 
@@ -396,6 +462,11 @@ async function guardarAnunciosSemanales() {
   if (indiceInicio >= indiceFin) {
     mensajeAsistenteAnuncios.textContent =
       "El día de anuncio de inicio de semana debe ser antes que el día de anuncio de fin de semana.";
+    return;
+  }
+
+  if (datos.regularizar_fecha_manual && !datos.fecha_regularizacion_manual) {
+    mensajeAsistenteAnuncios.textContent = "Selecciona la fecha desde la cual deseas regularizar.";
     return;
   }
 
@@ -434,6 +505,7 @@ botonCancelarAnuncios.addEventListener("click", () => dialogoAnuncios.close());
 const dialogoVerAnuncios = document.getElementById("dialogo-ver-anuncios");
 const cuerpoTablaAnuncios = document.getElementById("cuerpo-tabla-anuncios");
 const botonCerrarVerAnuncios = document.getElementById("boton-cerrar-ver-anuncios");
+const botonGenerarEnBlackboard = document.getElementById("boton-generar-en-blackboard");
 
 // Última configuración guardada con éxito en el asistente (ver
 // guardarAnunciosSemanales); "Ver anuncios" solo se habilita después de
@@ -451,6 +523,23 @@ const ORDINALES_SEMANA = [
   "Decimosexta", "Decimoséptima", "Decimoctava", "Decimonovena", "Vigésima",
 ];
 
+// Convierte el nombre tal como lo devuelve Blackboard (normalmente en
+// MAYÚSCULAS) a formato Título, ej. "GIAN CARLO QUIROZ" -> "Gian Carlo Quiroz".
+function formatearNombreDocente(nombre) {
+  return nombre
+    .toLowerCase()
+    .split(" ")
+    .filter(Boolean)
+    .map((palabra) => palabra.charAt(0).toUpperCase() + palabra.slice(1))
+    .join(" ");
+}
+
+// Nombre para firmar los anuncios, tomado del docente detectado en el login
+// de Blackboard (ver nombreDocenteActual); nunca un nombre fijo.
+function nombreFirmaDocente() {
+  return nombreDocenteActual ? formatearNombreDocente(nombreDocenteActual) : "el/la Docente";
+}
+
 function generarMensajeInicio(indice) {
   const ordinal = ORDINALES_SEMANA[indice];
   const introduccion =
@@ -466,7 +555,7 @@ ${introduccion} 📚💡 Cada sesión les permitirá desarrollar nuevas habilida
 Los invito a seguir participando activamente, plantear sus dudas y mantener el entusiasmo por aprender. Con constancia y dedicación, cada semana será una oportunidad para seguir creciendo. ¡Vamos por más! 🚀
 
 Saludos,
-Profesor Gian Carlo Quiroz`;
+Profesor ${nombreFirmaDocente()}`;
 }
 
 function generarMensajeFin(indice) {
@@ -480,11 +569,8 @@ Han continuado fortaleciendo sus conocimientos y desarrollando nuevas habilidade
 Los animo a repasar lo trabajado durante la semana y a seguir practicando. La constancia es la clave para lograr excelentes resultados. ¡Nos vemos en la siguiente sesión con nuevos retos y aprendizajes! 🚀
 
 Saludos,
-Profesor Gian Carlo Quiroz`;
+Profesor ${nombreFirmaDocente()}`;
 }
-
-const MENSAJES_INICIO_SEMANA = ORDINALES_SEMANA.map((_, indice) => generarMensajeInicio(indice));
-const MENSAJES_FIN_SEMANA = ORDINALES_SEMANA.map((_, indice) => generarMensajeFin(indice));
 
 // Título corto del anuncio, según el formato pedido.
 function tituloAnuncio(tipo, numeroSemana) {
@@ -493,10 +579,12 @@ function tituloAnuncio(tipo, numeroSemana) {
 
 // Mensaje de la base (20 para inicio, 20 para fin), usado en orden según el
 // número real de semana del curso; si el curso tiene más de 20 semanas, se
-// vuelve a empezar desde la primera de la base.
+// vuelve a empezar desde la primera de la base. Se genera al vuelo (no se
+// precalcula) porque incluye el nombre del docente, ya detectado en ese
+// momento gracias al login previo.
 function mensajeDeLaBase(tipo, numeroSemana) {
-  const lista = tipo === "Inicio" ? MENSAJES_INICIO_SEMANA : MENSAJES_FIN_SEMANA;
-  return lista[(numeroSemana - 1) % lista.length];
+  const indice = (numeroSemana - 1) % ORDINALES_SEMANA.length;
+  return tipo === "Inicio" ? generarMensajeInicio(indice) : generarMensajeFin(indice);
 }
 
 // Índice del día (lunes=0 ... domingo=6) de una fecha "YYYY-MM-DD", tratada
@@ -523,9 +611,13 @@ function sumarDias(fechaISO, dias) {
 // Por defecto, se omite cada anuncio individual cuya fecha ya pasó (no la
 // semana completa): por ejemplo, si el "inicio de semana" ya pasó pero el
 // "fin de semana" todavía no, se muestra solo el de fin. Se empieza a
-// mostrar desde el próximo anuncio disponible (>= hoy). Si se marcó
-// "regularizar" (confirmar_fecha_pasada), se muestran todos, incluidos los
-// que ya pasaron, desde la fecha real de inicio del curso.
+// mostrar desde el próximo anuncio disponible (>= hoy).
+//
+// Esto se puede cambiar con una de dos casillas, mutuamente excluyentes:
+// - "confirmar_fecha_pasada": no se omite nada, se muestran todas desde la
+//   fecha real de inicio del curso.
+// - "regularizar_fecha_manual" + "fecha_regularizacion_manual": en vez de
+//   "hoy", se usa esa fecha elegida a mano como punto de corte.
 function generarFilasAnuncios(configuracion) {
   const indiceInicio = DIAS_SEMANA.findIndex((dia) => dia.toLowerCase() === configuracion.dia_inicio_semana);
   const indiceFin = DIAS_SEMANA.findIndex((dia) => dia.toLowerCase() === configuracion.dia_fin_semana);
@@ -536,7 +628,13 @@ function generarFilasAnuncios(configuracion) {
   const desfaseHastaPrimerInicio = (indiceInicio - indiceDiaSemana(configuracion.fecha_inicio_curso) + 7) % 7;
   let fechaInicioSemana = sumarDias(configuracion.fecha_inicio_curso, desfaseHastaPrimerInicio);
 
-  const hoy = fechaHoyISO();
+  // Punto de corte: null significa "no omitir nada".
+  const fechaCorte = configuracion.confirmar_fecha_pasada
+    ? null
+    : configuracion.regularizar_fecha_manual && configuracion.fecha_regularizacion_manual
+      ? configuracion.fecha_regularizacion_manual
+      : fechaHoyISO();
+
   const filas = [];
   let numeroSemana = 1;
   let nro = 1;
@@ -544,7 +642,7 @@ function generarFilasAnuncios(configuracion) {
   while (fechaInicioSemana <= configuracion.fecha_fin_curso) {
     const fechaFinSemana = sumarDias(fechaInicioSemana, desfaseFin);
 
-    if (configuracion.confirmar_fecha_pasada || fechaInicioSemana >= hoy) {
+    if (fechaCorte === null || fechaInicioSemana >= fechaCorte) {
       filas.push({
         nro: nro++,
         semana: `Semana ${numeroSemana}`,
@@ -556,7 +654,7 @@ function generarFilasAnuncios(configuracion) {
       });
     }
 
-    if (configuracion.confirmar_fecha_pasada || fechaFinSemana >= hoy) {
+    if (fechaCorte === null || fechaFinSemana >= fechaCorte) {
       filas.push({
         nro: nro++,
         semana: `Semana ${numeroSemana}`,
@@ -627,7 +725,15 @@ function abrirVistaAnuncios() {
     return;
   }
 
-  const filas = generarFilasAnuncios(configuracionAnunciosActual);
+  // La fecha de inicio/fin del curso ya no vive en esta configuración: se
+  // toma de "Cursos activos" (cursosFechas), la fuente única para ambas
+  // herramientas.
+  const fechasCurso = cursosFechas[configuracionAnunciosActual.curso_codigo];
+  if (!fechasCurso) {
+    return;
+  }
+
+  const filas = generarFilasAnuncios({ ...configuracionAnunciosActual, ...fechasCurso });
 
   if (filas.length === 0) {
     const fila = document.createElement("tr");
@@ -683,17 +789,409 @@ function abrirVistaAnuncios() {
 botonVerAnuncios.addEventListener("click", abrirVistaAnuncios);
 botonCerrarVerAnuncios.addEventListener("click", () => dialogoVerAnuncios.close());
 
+// Lee la grilla de anuncios directamente del DOM (no de configuracionAnunciosActual),
+// para respetar cualquier edición manual que haya hecho el docente. Cada fila
+// principal (Nro/Semana/Tipo/Fecha/Hora) va seguida de su fila de detalle
+// oculta (Título/Mensaje); se recorren de a pares. Devuelve también las
+// celdas de título/mensaje, para poder sobrescribirlas al importar un CSV.
+function leerFilasDesdeTabla() {
+  const filasTabla = Array.from(cuerpoTablaAnuncios.children);
+  const filas = [];
+
+  for (let indice = 0; indice < filasTabla.length; indice += 2) {
+    const filaPrincipal = filasTabla[indice];
+    const filaDetalle = filasTabla[indice + 1];
+    if (!filaPrincipal || !filaDetalle) continue;
+
+    const inputsPrincipales = filaPrincipal.querySelectorAll("input");
+    const camposDetalle = filaDetalle.querySelectorAll(".celda-editable");
+
+    filas.push({
+      semana: inputsPrincipales[1].value,
+      tipo: inputsPrincipales[2].value,
+      fecha: inputsPrincipales[3].value,
+      hora: inputsPrincipales[4].value,
+      titulo: camposDetalle[0].value,
+      mensaje: camposDetalle[1].value,
+      campoTitulo: camposDetalle[0],
+      campoMensaje: camposDetalle[1],
+    });
+  }
+
+  return filas;
+}
+
+// --- Exportar / Importar anuncios (CSV) ---
+// Exporta solo semana, tipo, título y mensaje (lo único que un docente
+// necesita redactar aparte); fecha y hora quedan definidas por el asistente
+// y no se tocan al importar. Al importar, cada fila del CSV se encaja en la
+// grilla actual por semana + tipo, sin depender del orden de las filas.
+
+const botonExportarAnuncios = document.getElementById("boton-exportar-anuncios");
+const botonImportarAnuncios = document.getElementById("boton-importar-anuncios");
+const campoImportarAnuncios = document.getElementById("campo-importar-anuncios");
+
+// Encierra el valor entre comillas solo si lo necesita (contiene coma,
+// comillas o salto de línea), duplicando las comillas internas, siguiendo
+// el formato CSV estándar (RFC 4180) para que Excel lo abra sin problemas.
+function csvEscape(valor) {
+  const texto = String(valor ?? "");
+  if (/[",\r\n]/.test(texto)) {
+    return '"' + texto.replace(/"/g, '""') + '"';
+  }
+  return texto;
+}
+
+// Parser CSV manual (sin librerías): entiende comillas, comas y saltos de
+// línea dentro de campos entre comillas, que es justo lo que necesita el
+// mensaje de un anuncio (varios párrafos).
+function parsearCSV(texto) {
+  const filas = [];
+  let fila = [];
+  let campo = "";
+  let dentroDeComillas = false;
+  let indice = 0;
+
+  while (indice < texto.length) {
+    const caracter = texto[indice];
+
+    if (dentroDeComillas) {
+      if (caracter === '"') {
+        if (texto[indice + 1] === '"') {
+          campo += '"';
+          indice += 2;
+          continue;
+        }
+        dentroDeComillas = false;
+        indice += 1;
+        continue;
+      }
+      campo += caracter;
+      indice += 1;
+      continue;
+    }
+
+    if (caracter === '"') {
+      dentroDeComillas = true;
+      indice += 1;
+    } else if (caracter === ",") {
+      fila.push(campo);
+      campo = "";
+      indice += 1;
+    } else if (caracter === "\r") {
+      indice += 1;
+    } else if (caracter === "\n") {
+      fila.push(campo);
+      filas.push(fila);
+      fila = [];
+      campo = "";
+      indice += 1;
+    } else {
+      campo += caracter;
+      indice += 1;
+    }
+  }
+
+  if (campo !== "" || fila.length > 0) {
+    fila.push(campo);
+    filas.push(fila);
+  }
+
+  return filas;
+}
+
+// Convierte las filas crudas del CSV (con su fila de encabezado) en objetos
+// {semana, tipo, titulo, mensaje}, buscando las columnas por nombre en vez
+// de asumir un orden fijo, por si el docente reordena columnas en Excel.
+function filasCSVaObjetos(filasCrudas) {
+  if (filasCrudas.length === 0) {
+    return [];
+  }
+
+  const encabezado = filasCrudas[0].map((valor) => valor.trim().toLowerCase());
+  const indiceSemana = encabezado.indexOf("semana");
+  const indiceTipo = encabezado.indexOf("tipo");
+  const indiceTitulo = encabezado.indexOf("titulo");
+  const indiceMensaje = encabezado.indexOf("mensaje");
+
+  const objetos = [];
+  for (let i = 1; i < filasCrudas.length; i++) {
+    const fila = filasCrudas[i];
+    if (fila.length === 1 && fila[0].trim() === "") continue; // línea vacía al final
+
+    objetos.push({
+      semana: indiceSemana >= 0 ? fila[indiceSemana] || "" : "",
+      tipo: indiceTipo >= 0 ? fila[indiceTipo] || "" : "",
+      titulo: indiceTitulo >= 0 ? fila[indiceTitulo] || "" : "",
+      mensaje: indiceMensaje >= 0 ? fila[indiceMensaje] || "" : "",
+    });
+  }
+  return objetos;
+}
+
+function descargarArchivo(contenido, nombreArchivo, tipoMime) {
+  const blob = new Blob([contenido], { type: tipoMime });
+  const url = URL.createObjectURL(blob);
+  const enlace = document.createElement("a");
+  enlace.href = url;
+  enlace.download = nombreArchivo;
+  document.body.appendChild(enlace);
+  enlace.click();
+  document.body.removeChild(enlace);
+  URL.revokeObjectURL(url);
+}
+
+function exportarAnuncios() {
+  const filas = leerFilasDesdeTabla();
+  if (filas.length === 0) {
+    mostrarResultadoBlackboard("Nada que exportar", "Primero genera la vista de anuncios.");
+    return;
+  }
+
+  const lineas = [["semana", "tipo", "titulo", "mensaje"].map(csvEscape).join(",")];
+  for (const fila of filas) {
+    lineas.push([fila.semana, fila.tipo, fila.titulo, fila.mensaje].map(csvEscape).join(","));
+  }
+
+  // El BOM al inicio hace que Excel detecte UTF-8 automáticamente; sin él,
+  // las tildes y emojis del mensaje se ven mal al abrir el CSV en Excel.
+  const contenido = "﻿" + lineas.join("\r\n");
+  const codigoCurso = configuracionAnunciosActual ? configuracionAnunciosActual.curso_codigo : "curso";
+  descargarArchivo(contenido, `anuncios_${codigoCurso}.csv`, "text/csv;charset=utf-8");
+}
+
+function normalizarClave(valor) {
+  return String(valor || "").trim().toLowerCase();
+}
+
+function importarAnunciosDesdeCSV(texto) {
+  const filasTabla = leerFilasDesdeTabla();
+  if (filasTabla.length === 0) {
+    mostrarResultadoBlackboard("Nada que importar", "Primero genera la vista de anuncios.");
+    return;
+  }
+
+  const filasCSV = filasCSVaObjetos(parsearCSV(texto));
+  if (filasCSV.length === 0) {
+    mostrarResultadoBlackboard("Archivo vacío", "El archivo no tiene filas para importar.");
+    return;
+  }
+
+  let aplicadas = 0;
+  const sinCoincidencia = [];
+
+  for (const filaCSV of filasCSV) {
+    const clave = `${normalizarClave(filaCSV.semana)}|${normalizarClave(filaCSV.tipo)}`;
+    const filaEncontrada = filasTabla.find(
+      (fila) => `${normalizarClave(fila.semana)}|${normalizarClave(fila.tipo)}` === clave
+    );
+    if (!filaEncontrada) {
+      sinCoincidencia.push(`${filaCSV.semana} - ${filaCSV.tipo}`);
+      continue;
+    }
+    filaEncontrada.campoTitulo.value = filaCSV.titulo;
+    filaEncontrada.campoMensaje.value = filaCSV.mensaje;
+    aplicadas += 1;
+  }
+
+  let mensaje = `Se completaron ${aplicadas} de ${filasCSV.length} fila(s) del archivo.`;
+  if (sinCoincidencia.length > 0) {
+    mensaje += ` Sin coincidencia de semana/tipo en la grilla actual: ${sinCoincidencia.join(", ")}.`;
+  }
+  mostrarResultadoBlackboard("Importación completada", mensaje);
+}
+
+botonExportarAnuncios.addEventListener("click", exportarAnuncios);
+botonImportarAnuncios.addEventListener("click", () => campoImportarAnuncios.click());
+campoImportarAnuncios.addEventListener("change", async () => {
+  const archivo = campoImportarAnuncios.files[0];
+  campoImportarAnuncios.value = ""; // permite elegir el mismo archivo otra vez más adelante
+  if (!archivo) {
+    return;
+  }
+  const texto = await archivo.text();
+  importarAnunciosDesdeCSV(texto);
+});
+
+// --- Generar en Blackboard ---
+// Toma exactamente lo que se ve en la grilla (con cualquier edición manual
+// del docente) y crea cada fila como un anuncio real en Blackboard, usando
+// el panel "Crear anuncio" del curso. Los avisos y la confirmación usan
+// diálogos propios (mismo estilo que "Guardado correctamente"), no los
+// popups nativos del navegador (alert/confirm).
+
+const dialogoConfirmarBlackboard = document.getElementById("dialogo-confirmar-blackboard");
+const mensajeConfirmarBlackboard = document.getElementById("mensaje-confirmar-blackboard");
+const botonConfirmarGenerarBlackboard = document.getElementById("boton-confirmar-generar-blackboard");
+const botonCancelarGenerarBlackboard = document.getElementById("boton-cancelar-generar-blackboard");
+
+const dialogoResultadoBlackboard = document.getElementById("dialogo-resultado-blackboard");
+const tituloResultadoBlackboard = document.getElementById("titulo-resultado-blackboard");
+const mensajeResultadoBlackboard = document.getElementById("mensaje-resultado-blackboard");
+const botonCerrarResultadoBlackboard = document.getElementById("boton-cerrar-resultado-blackboard");
+
+function mostrarResultadoBlackboard(titulo, mensaje) {
+  tituloResultadoBlackboard.textContent = titulo;
+  mensajeResultadoBlackboard.textContent = mensaje;
+  dialogoResultadoBlackboard.showModal();
+}
+
+botonCerrarResultadoBlackboard.addEventListener("click", () => dialogoResultadoBlackboard.close());
+
+// Envuelve el diálogo de confirmación en una promesa, para poder usarlo con
+// await igual que se usaba confirm() antes.
+function confirmarGenerarEnBlackboard(mensaje) {
+  return new Promise((resolve) => {
+    mensajeConfirmarBlackboard.textContent = mensaje;
+
+    function aceptar() {
+      limpiar();
+      dialogoConfirmarBlackboard.close();
+      resolve(true);
+    }
+    function cancelar() {
+      limpiar();
+      dialogoConfirmarBlackboard.close();
+      resolve(false);
+    }
+    function limpiar() {
+      botonConfirmarGenerarBlackboard.removeEventListener("click", aceptar);
+      botonCancelarGenerarBlackboard.removeEventListener("click", cancelar);
+    }
+
+    botonConfirmarGenerarBlackboard.addEventListener("click", aceptar);
+    botonCancelarGenerarBlackboard.addEventListener("click", cancelar);
+    dialogoConfirmarBlackboard.showModal();
+  });
+}
+
+async function generarEnBlackboard() {
+  const filasTabla = leerFilasDesdeTabla();
+  if (filasTabla.length === 0) {
+    mostrarResultadoBlackboard("Falta un paso", "Primero genera la vista de anuncios.");
+    return;
+  }
+
+  const codigoCurso = configuracionAnunciosActual && configuracionAnunciosActual.curso_codigo;
+  const cursoInfo = cursosObtenidos.find((curso) => curso.codigo === codigoCurso);
+  if (!cursoInfo || !cursoInfo.id) {
+    mostrarResultadoBlackboard(
+      "No se pudo identificar el curso",
+      'Vuelve a hacer clic en "Obtener Cursos Activos" para actualizar la lista de cursos, y luego intenta de nuevo.'
+    );
+    return;
+  }
+
+  const anuncios = filasTabla.map(({ tipo, titulo, mensaje, fecha, hora }) => ({ tipo, titulo, mensaje, fecha, hora }));
+
+  const confirmado = await confirmarGenerarEnBlackboard(
+    `Esto creará ${anuncios.length} anuncio(s) reales en Blackboard, en el curso "${cursoInfo.nombre}". ¿Deseas continuar?`
+  );
+  if (!confirmado) {
+    return;
+  }
+
+  botonGenerarEnBlackboard.disabled = true;
+  const textoOriginal = botonGenerarEnBlackboard.textContent;
+  botonGenerarEnBlackboard.textContent = "Generando...";
+
+  try {
+    const respuesta = await fetch("/api/anuncios-semanales/generar-en-blackboard", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id_curso: cursoInfo.id, anuncios }),
+    });
+    const resultado = await respuesta.json();
+
+    if (resultado.estado === "error") {
+      mostrarResultadoBlackboard(
+        "No se pudo generar",
+        resultado.error || "No se pudo generar los anuncios en Blackboard."
+      );
+      return;
+    }
+
+    let mensajeResultado = `Se publicaron ${resultado.publicados} de ${anuncios.length} anuncio(s) en Blackboard.`;
+    if (resultado.fallidos && resultado.fallidos.length > 0) {
+      mensajeResultado += ` No se pudieron publicar: ${resultado.fallidos.join(", ")}.`;
+    }
+    mostrarResultadoBlackboard(resultado.fallidos && resultado.fallidos.length > 0 ? "Generado con avisos" : "Listo", mensajeResultado);
+  } finally {
+    botonGenerarEnBlackboard.disabled = false;
+    botonGenerarEnBlackboard.textContent = textoOriginal;
+  }
+}
+
+botonGenerarEnBlackboard.addEventListener("click", generarEnBlackboard);
+
 // --- Cursos activos ---
 
 const tarjetaCursos = document.getElementById("tarjeta-cursos");
+const contadorCursos = document.getElementById("contador-cursos");
+const fechaObtencionCursos = document.getElementById("fecha-obtencion-cursos");
 const cargandoCursos = document.getElementById("cargando-cursos");
 const listaCursos = document.getElementById("lista-cursos");
 
 let intervaloConsultaCursos = null;
 
+// Convierte el "obtenido_en" que devuelve el servidor (ISO local, sin zona
+// horaria, ej. "2026-07-29T14:32:05") a un texto legible. Si no hay fecha
+// (por ejemplo, una lista guardada por una versión anterior del programa),
+// no se muestra nada.
+function formatearFechaObtencionCursos(iso) {
+  if (!iso) {
+    return "";
+  }
+  const fecha = new Date(iso);
+  if (Number.isNaN(fecha.getTime())) {
+    return "";
+  }
+  const dia = String(fecha.getDate()).padStart(2, "0");
+  const mes = String(fecha.getMonth() + 1).padStart(2, "0");
+  const anio = fecha.getFullYear();
+  const horas = String(fecha.getHours()).padStart(2, "0");
+  const minutos = String(fecha.getMinutes()).padStart(2, "0");
+  return `Obtenidos el ${dia}/${mes}/${anio} a las ${horas}:${minutos}`;
+}
+
+const dialogoConfirmarCursos = document.getElementById("dialogo-confirmar-cursos");
+const botonConfirmarObtenerCursos = document.getElementById("boton-confirmar-obtener-cursos");
+const botonCancelarObtenerCursos = document.getElementById("boton-cancelar-obtener-cursos");
+
+// Envuelve el diálogo de confirmación en una promesa, igual que
+// confirmarGenerarEnBlackboard, para poder usarlo con await.
+function confirmarObtenerCursos() {
+  return new Promise((resolve) => {
+    function aceptar() {
+      limpiar();
+      dialogoConfirmarCursos.close();
+      resolve(true);
+    }
+    function cancelar() {
+      limpiar();
+      dialogoConfirmarCursos.close();
+      resolve(false);
+    }
+    function limpiar() {
+      botonConfirmarObtenerCursos.removeEventListener("click", aceptar);
+      botonCancelarObtenerCursos.removeEventListener("click", cancelar);
+    }
+
+    botonConfirmarObtenerCursos.addEventListener("click", aceptar);
+    botonCancelarObtenerCursos.addEventListener("click", cancelar);
+    dialogoConfirmarCursos.showModal();
+  });
+}
+
 async function iniciarObtenerCursos() {
+  const confirmado = await confirmarObtenerCursos();
+  if (!confirmado) {
+    return;
+  }
+
   botonObtenerCursos.disabled = true;
   estadoCursosEl.textContent = "Buscando...";
+  contadorCursos.textContent = "";
   tarjetaCursos.classList.remove("oculto");
   cargandoCursos.classList.remove("oculto");
   listaCursos.innerHTML = "";
@@ -730,6 +1228,8 @@ async function consultarEstadoCursos() {
 
   if (estado.resultado !== "ok") {
     estadoCursosEl.textContent = "No se pudo obtener";
+    contadorCursos.textContent = "";
+    fechaObtencionCursos.textContent = "";
     listaCursos.innerHTML = "";
     const item = document.createElement("li");
     item.className = "mensaje-cursos";
@@ -739,9 +1239,13 @@ async function consultarEstadoCursos() {
   }
 
   cursosObtenidos = estado.cursos;
+  await cargarCursosFechas();
   actualizarBloqueoPlantilla();
+  actualizarBloqueoSesionesDictado();
 
   estadoCursosEl.textContent = estado.cursos.length + " curso(s) encontrado(s)";
+  contadorCursos.textContent = estado.cursos.length + " curso(s)";
+  fechaObtencionCursos.textContent = formatearFechaObtencionCursos(estado.obtenido_en);
 
   listaCursos.innerHTML = "";
   if (estado.cursos.length === 0) {
@@ -763,10 +1267,489 @@ async function consultarEstadoCursos() {
     nombre.className = "nombre-curso";
     nombre.textContent = curso.nombre;
 
-    item.appendChild(codigo);
-    item.appendChild(nombre);
+    const fechas = document.createElement("span");
+    fechas.className = "fechas-curso";
+
+    const botonFechas = document.createElement("button");
+    botonFechas.type = "button";
+    botonFechas.className = "boton-fechas-curso";
+    botonFechas.addEventListener("click", () => abrirModalFechasCurso(curso, fechas, botonFechas));
+
+    actualizarFechasEnTarjeta(curso.codigo, fechas, botonFechas);
+
+    item.append(codigo, nombre, fechas, botonFechas);
     listaCursos.appendChild(item);
   }
 }
 
 botonObtenerCursos.addEventListener("click", iniciarObtenerCursos);
+
+// --- Fechas de curso ---
+// Cada tarjeta de curso tiene un botón para configurar su fecha de inicio y
+// fin. Esa es ahora la única fuente de esas fechas: "Generar Anuncios
+// Semanales" y "Generar Sesiones Dictado" las leen de aquí (cursosFechas) en
+// vez de pedirlas otra vez en sus propios formularios.
+
+const dialogoFechasCurso = document.getElementById("dialogo-fechas-curso");
+const nombreCursoFechas = document.getElementById("nombre-curso-fechas");
+const campoFechaInicioCurso = document.getElementById("campo-fecha-inicio-curso");
+const campoFechaFinCurso = document.getElementById("campo-fecha-fin-curso");
+const mensajeFechasCurso = document.getElementById("mensaje-fechas-curso");
+const botonGuardarFechasCurso = document.getElementById("boton-guardar-fechas-curso");
+const botonCancelarFechasCurso = document.getElementById("boton-cancelar-fechas-curso");
+
+// Curso y elementos de su tarjeta que se están editando en el modal
+// actualmente abierto, para poder actualizar esa misma tarjeta al guardar.
+let cursoFechasActual = null;
+
+function formatearFechaCorta(iso) {
+  if (!iso) {
+    return "";
+  }
+  const [anio, mes, dia] = iso.split("-");
+  return `${dia}/${mes}/${anio}`;
+}
+
+function actualizarFechasEnTarjeta(codigoCurso, fechasEl, botonEl) {
+  const fechas = cursosFechas[codigoCurso];
+  if (fechas) {
+    fechasEl.textContent = `Del ${formatearFechaCorta(fechas.fecha_inicio_curso)} al ${formatearFechaCorta(fechas.fecha_fin_curso)}`;
+    fechasEl.classList.remove("sin-configurar");
+    botonEl.textContent = "Editar fechas";
+  } else {
+    fechasEl.textContent = "Sin fechas configuradas";
+    fechasEl.classList.add("sin-configurar");
+    botonEl.textContent = "Configurar fechas";
+  }
+}
+
+function abrirModalFechasCurso(curso, fechasEl, botonEl) {
+  cursoFechasActual = { curso, fechasEl, botonEl };
+  const fechas = cursosFechas[curso.codigo];
+  nombreCursoFechas.textContent = curso.nombre;
+  campoFechaInicioCurso.value = fechas ? fechas.fecha_inicio_curso : "";
+  campoFechaFinCurso.value = fechas ? fechas.fecha_fin_curso : "";
+  mensajeFechasCurso.textContent = "";
+  dialogoFechasCurso.showModal();
+}
+
+async function guardarFechasCurso() {
+  if (!cursoFechasActual) {
+    return;
+  }
+
+  const datos = {
+    curso_codigo: cursoFechasActual.curso.codigo,
+    fecha_inicio_curso: campoFechaInicioCurso.value,
+    fecha_fin_curso: campoFechaFinCurso.value,
+  };
+
+  if (!datos.fecha_inicio_curso || !datos.fecha_fin_curso) {
+    mensajeFechasCurso.textContent = "Completa ambas fechas.";
+    return;
+  }
+
+  if (datos.fecha_inicio_curso >= datos.fecha_fin_curso) {
+    mensajeFechasCurso.textContent = "La fecha de inicio debe ser anterior a la fecha de fin.";
+    return;
+  }
+
+  botonGuardarFechasCurso.disabled = true;
+  const respuesta = await fetch("/api/cursos/fechas/guardar", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(datos),
+  });
+  const resultado = await respuesta.json();
+  botonGuardarFechasCurso.disabled = false;
+
+  if (resultado.estado !== "ok") {
+    mensajeFechasCurso.textContent = resultado.error || "No se pudo guardar la fecha del curso.";
+    return;
+  }
+
+  cursosFechas[datos.curso_codigo] = {
+    fecha_inicio_curso: datos.fecha_inicio_curso,
+    fecha_fin_curso: datos.fecha_fin_curso,
+  };
+  actualizarFechasEnTarjeta(datos.curso_codigo, cursoFechasActual.fechasEl, cursoFechasActual.botonEl);
+  actualizarBloqueoPlantilla();
+  actualizarBloqueoSesionesDictado();
+  dialogoFechasCurso.close();
+}
+
+botonGuardarFechasCurso.addEventListener("click", guardarFechasCurso);
+botonCancelarFechasCurso.addEventListener("click", () => dialogoFechasCurso.close());
+
+// --- Generar Sesiones Dictado ---
+// Mismo patrón que "Generar Anuncios Semanales": un asistente que guarda
+// la configuración por curso, y un botón "Ver Sesiones" que solo se
+// habilita después de guardar y que genera la grilla real (desde hoy en
+// adelante, nunca desde el pasado).
+
+const dialogoSesiones = document.getElementById("dialogo-sesiones-dictado");
+const campoCursoSesiones = document.getElementById("campo-curso-sesiones");
+const tablaHorarioSemanal = document.getElementById("tabla-horario-semanal");
+const mensajeAsistenteSesiones = document.getElementById("mensaje-asistente-sesiones");
+const botonGuardarSesiones = document.getElementById("boton-guardar-sesiones-dictado");
+const botonVerSesiones = document.getElementById("boton-ver-sesiones-dictado");
+const botonCancelarSesiones = document.getElementById("boton-cancelar-sesiones-dictado");
+
+const dialogoGuardadoSesionesOk = document.getElementById("dialogo-guardado-sesiones-ok");
+const botonCerrarGuardadoSesionesOk = document.getElementById("boton-cerrar-guardado-sesiones-ok");
+
+const dialogoVerSesiones = document.getElementById("dialogo-ver-sesiones");
+const cuerpoTablaSesiones = document.getElementById("cuerpo-tabla-sesiones");
+const botonAbrirFeriados = document.getElementById("boton-abrir-feriados");
+const botonCerrarVerSesiones = document.getElementById("boton-cerrar-ver-sesiones");
+
+const dialogoFeriados = document.getElementById("dialogo-feriados");
+const listaFeriados = document.getElementById("lista-feriados");
+const campoNuevoFeriado = document.getElementById("campo-nuevo-feriado");
+const botonAgregarFeriado = document.getElementById("boton-agregar-feriado");
+const botonCerrarFeriados = document.getElementById("boton-cerrar-feriados");
+
+// Configuración de sesiones ya guardada con éxito en el asistente; "Ver
+// Sesiones" solo se habilita después de guardar.
+let configuracionSesionesActual = null;
+let ultimosFeriadosCargados = [];
+
+function construirTablaHorarioSemanal() {
+  tablaHorarioSemanal.innerHTML = "";
+  for (const dia of DIAS_SEMANA) {
+    const fila = document.createElement("div");
+    fila.className = "fila-horario-dia";
+    fila.dataset.dia = dia.toLowerCase();
+
+    const nombre = document.createElement("span");
+    nombre.className = "nombre-dia";
+    nombre.textContent = dia;
+
+    const horaInicio = document.createElement("input");
+    horaInicio.type = "time";
+    horaInicio.className = "hora-inicio-dia";
+    horaInicio.setAttribute("aria-label", `Hora de inicio, ${dia}`);
+
+    const horaFin = document.createElement("input");
+    horaFin.type = "time";
+    horaFin.className = "hora-fin-dia";
+    horaFin.setAttribute("aria-label", `Hora de fin, ${dia}`);
+
+    fila.append(nombre, horaInicio, horaFin);
+    tablaHorarioSemanal.appendChild(fila);
+  }
+}
+
+construirTablaHorarioSemanal();
+
+function leerHorarioSemanalFormulario() {
+  const horarios = {};
+  for (const fila of tablaHorarioSemanal.querySelectorAll(".fila-horario-dia")) {
+    const dia = fila.dataset.dia;
+    const horaInicio = fila.querySelector(".hora-inicio-dia").value;
+    const horaFin = fila.querySelector(".hora-fin-dia").value;
+    if (horaInicio && horaFin) {
+      horarios[dia] = { hora_inicio: horaInicio, hora_fin: horaFin };
+    }
+  }
+  return horarios;
+}
+
+function precargarHorarioSemanalFormulario(horarios) {
+  for (const fila of tablaHorarioSemanal.querySelectorAll(".fila-horario-dia")) {
+    const dia = fila.dataset.dia;
+    const valor = horarios && horarios[dia];
+    fila.querySelector(".hora-inicio-dia").value = valor ? valor.hora_inicio : "";
+    fila.querySelector(".hora-fin-dia").value = valor ? valor.hora_fin : "";
+  }
+}
+
+async function precargarConfiguracionSesiones(codigoCurso) {
+  mensajeAsistenteSesiones.textContent = "";
+
+  let configuracion = null;
+  if (codigoCurso) {
+    const respuesta = await fetch(`/api/sesiones-dictado/${encodeURIComponent(codigoCurso)}`);
+    const datos = await respuesta.json();
+    if (datos && datos.curso_codigo) {
+      configuracion = datos;
+    }
+  }
+
+  precargarHorarioSemanalFormulario(configuracion ? configuracion.horarios : null);
+
+  if (configuracion) {
+    configuracionSesionesActual = configuracion;
+    botonVerSesiones.disabled = false;
+  }
+}
+
+function abrirAsistenteSesiones() {
+  campoCursoSesiones.innerHTML = "";
+  // Solo se listan los cursos que ya tienen fecha de inicio/fin configurada
+  // desde "Cursos activos": este asistente ya no las pide.
+  for (const curso of cursosObtenidos) {
+    if (!cursosFechas[curso.codigo]) continue;
+    const opcion = document.createElement("option");
+    opcion.value = curso.codigo;
+    opcion.textContent = curso.nombre;
+    campoCursoSesiones.appendChild(opcion);
+  }
+
+  mensajeAsistenteSesiones.textContent = "";
+  botonVerSesiones.disabled = true;
+  precargarConfiguracionSesiones(campoCursoSesiones.value);
+  dialogoSesiones.showModal();
+}
+
+campoCursoSesiones.addEventListener("change", () => {
+  botonVerSesiones.disabled = true;
+  precargarConfiguracionSesiones(campoCursoSesiones.value);
+});
+
+botonGenerarSesionesDictado.addEventListener("click", abrirAsistenteSesiones);
+botonCancelarSesiones.addEventListener("click", () => dialogoSesiones.close());
+
+async function guardarSesionesDictado() {
+  const cursoSeleccionado = cursosObtenidos.find((curso) => curso.codigo === campoCursoSesiones.value);
+  const horarios = leerHorarioSemanalFormulario();
+
+  const datos = {
+    curso_codigo: campoCursoSesiones.value,
+    curso_nombre: cursoSeleccionado ? cursoSeleccionado.nombre : "",
+    horarios,
+  };
+
+  if (!datos.curso_codigo) {
+    mensajeAsistenteSesiones.textContent = "Selecciona un curso.";
+    return;
+  }
+
+  if (Object.keys(horarios).length === 0) {
+    mensajeAsistenteSesiones.textContent = "Marca al menos un día de la semana con hora de inicio y fin.";
+    return;
+  }
+
+  for (const [dia, valor] of Object.entries(horarios)) {
+    if (valor.hora_fin <= valor.hora_inicio) {
+      mensajeAsistenteSesiones.textContent = `La hora de fin del ${dia} debe ser posterior a la de inicio.`;
+      return;
+    }
+  }
+
+  botonGuardarSesiones.disabled = true;
+  const respuesta = await fetch("/api/sesiones-dictado/guardar", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(datos),
+  });
+  const resultado = await respuesta.json();
+  botonGuardarSesiones.disabled = false;
+
+  if (resultado.estado !== "ok") {
+    mensajeAsistenteSesiones.textContent = resultado.error || "No se pudo guardar la configuración.";
+    return;
+  }
+
+  mensajeAsistenteSesiones.textContent = "";
+  configuracionSesionesActual = datos;
+  botonVerSesiones.disabled = false;
+  dialogoGuardadoSesionesOk.showModal();
+}
+
+botonGuardarSesiones.addEventListener("click", guardarSesionesDictado);
+botonCerrarGuardadoSesionesOk.addEventListener("click", () => dialogoGuardadoSesionesOk.close());
+
+// Reordena "Nombres Apellidos" -> "Apellidos Nombres" para nombres de 4
+// palabras (el patrón peruano más común: 2 nombres + 2 apellidos). Si no
+// calzan exactamente 4 palabras, se deja el nombre tal como llegó de
+// Blackboard, para no adivinar de más.
+function nombreDocenteParaSesion() {
+  if (!nombreDocenteActual) {
+    return "";
+  }
+  const palabras = nombreDocenteActual.trim().split(/\s+/);
+  if (palabras.length === 4) {
+    return `${palabras[2]} ${palabras[3]} ${palabras[0]} ${palabras[1]}`;
+  }
+  return nombreDocenteActual;
+}
+
+// Arma una fila por cada sesión de dictado, desde hoy (nunca desde el
+// pasado) hasta fecha_fin_curso, usando el horario semanal guardado.
+function generarFilasSesiones(configuracion) {
+  const hoy = fechaHoyISO();
+  const fechaInicio = configuracion.fecha_inicio_curso > hoy ? configuracion.fecha_inicio_curso : hoy;
+
+  const codigoCorto = configuracion.curso_nombre.split(" ")[0];
+  const nombreSinCodigo = configuracion.curso_nombre.slice(codigoCorto.length + 1);
+  const nombreDocenteSesion = nombreDocenteParaSesion();
+
+  const filas = [];
+  let nro = 1;
+  let fecha = fechaInicio;
+
+  while (fecha <= configuracion.fecha_fin_curso) {
+    const dia = DIAS_SEMANA[indiceDiaSemana(fecha)].toLowerCase();
+    const horario = configuracion.horarios[dia];
+
+    if (horario) {
+      const numeroSesion = String(nro).padStart(2, "0");
+      filas.push({
+        nro: nro,
+        sesion: `SESIÓN ${numeroSesion} - ${nombreSinCodigo} (${codigoCorto}) - ${nombreDocenteSesion}`,
+        fecha,
+        horaInicio: horario.hora_inicio,
+        horaFin: horario.hora_fin,
+      });
+      nro += 1;
+    }
+
+    fecha = sumarDias(fecha, 1);
+  }
+
+  return filas;
+}
+
+function actualizarResaltadoFeriados() {
+  const feriados = new Set(ultimosFeriadosCargados);
+  for (const fila of cuerpoTablaSesiones.querySelectorAll("tr")) {
+    const campoFecha = fila.querySelector('input[type="date"]');
+    if (!campoFecha) continue;
+    fila.classList.toggle("fila-feriado", feriados.has(campoFecha.value));
+  }
+}
+
+async function abrirVistaSesiones() {
+  cuerpoTablaSesiones.innerHTML = "";
+
+  if (!configuracionSesionesActual) {
+    return;
+  }
+
+  // La fecha de inicio/fin del curso ya no vive en esta configuración: se
+  // toma de "Cursos activos" (cursosFechas), la fuente única para ambas
+  // herramientas.
+  const fechasCurso = cursosFechas[configuracionSesionesActual.curso_codigo];
+  if (!fechasCurso) {
+    return;
+  }
+
+  const respuestaFeriados = await fetch("/api/feriados");
+  const datosFeriados = await respuestaFeriados.json();
+  ultimosFeriadosCargados = datosFeriados.feriados || [];
+
+  const filas = generarFilasSesiones({ ...configuracionSesionesActual, ...fechasCurso });
+
+  if (filas.length === 0) {
+    const fila = document.createElement("tr");
+    const celda = document.createElement("td");
+    celda.colSpan = 5;
+    celda.textContent = "No hay sesiones desde hoy hasta el fin del curso, con el horario configurado.";
+    fila.appendChild(celda);
+    cuerpoTablaSesiones.appendChild(fila);
+    dialogoVerSesiones.showModal();
+    return;
+  }
+
+  for (const sesion of filas) {
+    const fila = document.createElement("tr");
+    const columnas = [
+      [sesion.nro, "number"],
+      [sesion.sesion, "text"],
+      [sesion.fecha, "date"],
+      [sesion.horaInicio, "time"],
+      [sesion.horaFin, "time"],
+    ];
+
+    for (const [valor, tipo] of columnas) {
+      const celda = document.createElement("td");
+      celda.appendChild(crearCeldaEditable(valor, tipo));
+      fila.appendChild(celda);
+    }
+
+    cuerpoTablaSesiones.appendChild(fila);
+  }
+
+  actualizarResaltadoFeriados();
+  dialogoVerSesiones.showModal();
+}
+
+botonVerSesiones.addEventListener("click", abrirVistaSesiones);
+botonCerrarVerSesiones.addEventListener("click", () => dialogoVerSesiones.close());
+
+// --- Feriados ---
+// Lista editable (agregar/quitar) usada para marcar en rojo las sesiones
+// de dictado que caen en un día no laborable. Cada cambio se guarda de
+// inmediato (no hay un botón "Guardar" aparte para esto).
+
+function renderizarListaFeriados(feriados) {
+  listaFeriados.innerHTML = "";
+  const ordenados = [...feriados].sort();
+
+  if (ordenados.length === 0) {
+    const item = document.createElement("li");
+    item.textContent = "No hay feriados guardados.";
+    listaFeriados.appendChild(item);
+    return;
+  }
+
+  for (const fecha of ordenados) {
+    const item = document.createElement("li");
+
+    const texto = document.createElement("span");
+    texto.textContent = fecha;
+
+    const botonQuitar = document.createElement("button");
+    botonQuitar.type = "button";
+    botonQuitar.className = "boton-quitar-feriado";
+    botonQuitar.textContent = "Quitar";
+    botonQuitar.addEventListener("click", () => quitarFeriado(fecha));
+
+    item.append(texto, botonQuitar);
+    listaFeriados.appendChild(item);
+  }
+}
+
+async function guardarListaFeriados(feriados) {
+  const respuesta = await fetch("/api/feriados", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ feriados }),
+  });
+  const resultado = await respuesta.json();
+  ultimosFeriadosCargados = resultado.feriados || [];
+  renderizarListaFeriados(ultimosFeriadosCargados);
+}
+
+function quitarFeriado(fecha) {
+  guardarListaFeriados(ultimosFeriadosCargados.filter((f) => f !== fecha));
+}
+
+function agregarFeriado() {
+  const fecha = campoNuevoFeriado.value;
+  if (!fecha) {
+    return;
+  }
+  if (!ultimosFeriadosCargados.includes(fecha)) {
+    guardarListaFeriados([...ultimosFeriadosCargados, fecha]);
+  }
+  campoNuevoFeriado.value = "";
+}
+
+async function abrirFeriados() {
+  const respuesta = await fetch("/api/feriados");
+  const datos = await respuesta.json();
+  ultimosFeriadosCargados = datos.feriados || [];
+  renderizarListaFeriados(ultimosFeriadosCargados);
+  dialogoFeriados.showModal();
+}
+
+botonAbrirFeriados.addEventListener("click", abrirFeriados);
+botonAgregarFeriado.addEventListener("click", agregarFeriado);
+botonCerrarFeriados.addEventListener("click", () => {
+  dialogoFeriados.close();
+  // Si la grilla de sesiones sigue abierta detrás, refleja los cambios de
+  // feriados de inmediato, sin tener que volver a generarla.
+  actualizarResaltadoFeriados();
+});

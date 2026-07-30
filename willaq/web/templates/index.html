@@ -27,39 +27,54 @@
   </header>
 
   <main class="panel">
-    <section class="tarjeta tarjeta-estado">
-      <div class="etiqueta-monoespaciada">
-        <span id="punto-estado" class="punto-estado"></span>
-        SYSTEM://LOGIN_BLACKBOARD
-      </div>
+    <div class="columna-principal">
+      <section class="tarjeta tarjeta-estado">
+        <div class="etiqueta-monoespaciada">
+          <span id="punto-estado" class="punto-estado"></span>
+          SYSTEM://LOGIN_BLACKBOARD
+        </div>
 
-      <h1 id="titulo-estado" class="titulo-hero">INACTIVO</h1>
-      <p id="descripcion-estado" class="descripcion-estado">
-        Presiona "Iniciar sesión" para abrir Blackboard y verificar tu acceso.
-      </p>
+        <h1 id="titulo-estado" class="titulo-hero">INACTIVO</h1>
+        <p id="descripcion-estado" class="descripcion-estado">
+          Presiona "Iniciar sesión" para abrir Blackboard y verificar tu acceso.
+        </p>
 
-      <div class="botonera">
-        <button id="boton-iniciar-login" class="boton boton-primario" type="button">
-          Iniciar sesión
-        </button>
-        <button id="boton-confirmar-login-manual" class="boton boton-secundario oculto" type="button">
-          Ya completé el login, continuar
-        </button>
-        <button id="boton-confirmar-cierre" class="boton boton-secundario oculto" type="button">
-          Cerrar navegador
-        </button>
-      </div>
+        <div class="botonera">
+          <button id="boton-iniciar-login" class="boton boton-primario" type="button">
+            Iniciar sesión
+          </button>
+          <button id="boton-confirmar-login-manual" class="boton boton-secundario oculto" type="button">
+            Ya completé el login, continuar
+          </button>
+          <button id="boton-confirmar-cierre" class="boton boton-secundario oculto" type="button">
+            Cerrar navegador
+          </button>
+        </div>
 
-      <div id="cargando" class="cargando oculto">
-        <span class="spinner" aria-hidden="true"></span>
-        <span id="texto-cargando">Trabajando...</span>
-      </div>
+        <div id="cargando" class="cargando oculto">
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="texto-cargando">Trabajando...</span>
+        </div>
 
-      <details class="detalles-tecnicos">
-        <summary>Ver detalles técnicos</summary>
-        <pre id="registro-login" class="registro"></pre>
-      </details>
-    </section>
+        <details class="detalles-tecnicos">
+          <summary>Ver detalles técnicos</summary>
+          <pre id="registro-login" class="registro"></pre>
+        </details>
+      </section>
+
+      <section id="tarjeta-cursos" class="tarjeta tarjeta-cursos oculto">
+        <div class="cabecera-tarjeta-cursos">
+          <h2 class="titulo-tarjeta">Cursos activos</h2>
+          <span id="contador-cursos" class="contador-cursos"></span>
+        </div>
+        <p id="fecha-obtencion-cursos" class="fecha-obtencion-cursos"></p>
+        <div id="cargando-cursos" class="cargando oculto">
+          <span class="spinner" aria-hidden="true"></span>
+          <span>Buscando tus cursos...</span>
+        </div>
+        <ul id="lista-cursos" class="lista-cursos"></ul>
+      </section>
+    </div>
 
     <aside class="columna-lateral">
       <section class="tarjeta tarjeta-compacta">
@@ -94,6 +109,16 @@
             </div>
             <button id="boton-generar-plantilla" class="boton-pequeno" type="button" disabled>Generar</button>
           </li>
+          <li id="item-sesiones-dictado" class="item-herramienta bloqueada">
+            <div class="icono-herramienta">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18"/><path d="M8 2v4M16 2v4"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></svg>
+            </div>
+            <div>
+              <p class="nombre-herramienta">Generar Sesiones Dictado</p>
+              <p class="estado-herramienta" id="estado-sesiones-dictado">Obtén tus cursos primero</p>
+            </div>
+            <button id="boton-generar-sesiones-dictado" class="boton-pequeno" type="button" disabled>Generar</button>
+          </li>
           <li class="item-herramienta pendiente">
             <div class="icono-herramienta">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6l-5 4H4a1 1 0 0 0-1 1z"/><path d="M16 8a4 4 0 0 1 0 8"/><path d="M19 5a8 8 0 0 1 0 14"/></svg>
@@ -123,27 +148,57 @@
           </li>
         </ul>
       </section>
-
-      <section id="tarjeta-cursos" class="tarjeta tarjeta-compacta oculto">
-        <h2 class="titulo-tarjeta">Cursos activos</h2>
-        <div id="cargando-cursos" class="cargando oculto">
-          <span class="spinner" aria-hidden="true"></span>
-          <span>Buscando tus cursos...</span>
-        </div>
-        <ul id="lista-cursos" class="lista-cursos"></ul>
-      </section>
-
-      <section id="tarjeta-sesion" class="tarjeta tarjeta-compacta oculto">
-        <h2 class="titulo-tarjeta">Sesión local</h2>
-        <dl class="lista-datos">
-          <div>
-            <dt>Perfil guardado</dt>
-            <dd>datos/perfil_navegador/</dd>
-          </div>
-        </dl>
-      </section>
     </aside>
   </main>
+
+  <dialog id="dialogo-confirmar-cursos" class="dialogo">
+    <div class="dialogo-contenido">
+      <h2>¿Obtener cursos activos?</h2>
+      <p class="descripcion-dialogo">
+        Esto abrirá una ventana del navegador y consultará en Blackboard la lista de tus cursos activos.
+        Puede tardar unos segundos.
+      </p>
+      <p class="descripcion-dialogo">
+        Los cursos obtenidos se guardarán y con ellos trabajará todo el flujo (fechas de cada curso, Generar
+        Anuncios Semanales, Generar Sesiones Dictado y demás herramientas), <strong>hasta que vuelvas a hacer
+        clic en "Obtener Cursos Activos"</strong>: eso borrará esas configuraciones guardadas y el flujo
+        empezará de nuevo.
+      </p>
+      <div class="botonera">
+        <button type="button" id="boton-confirmar-obtener-cursos" class="boton boton-primario">Sí, obtener</button>
+        <button type="button" id="boton-cancelar-obtener-cursos" class="boton boton-secundario">Cancelar</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="dialogo-fechas-curso" class="dialogo">
+    <form id="formulario-fechas-curso">
+      <h2>Fechas del curso</h2>
+      <p class="descripcion-dialogo" id="nombre-curso-fechas"></p>
+
+      <div class="fila-campos">
+        <label class="campo">
+          <span class="etiqueta-campo">Fecha de inicio del curso</span>
+          <input type="date" id="campo-fecha-inicio-curso" required>
+        </label>
+        <label class="campo">
+          <span class="etiqueta-campo">Fecha de fin del curso</span>
+          <input type="date" id="campo-fecha-fin-curso" required>
+        </label>
+      </div>
+
+      <p id="mensaje-fechas-curso" class="mensaje-cursos"></p>
+
+      <div class="botonera">
+        <button type="button" id="boton-guardar-fechas-curso" class="boton boton-primario">
+          Guardar
+        </button>
+        <button type="button" id="boton-cancelar-fechas-curso" class="boton boton-secundario">
+          Cancelar
+        </button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog id="dialogo-anuncios-semanales" class="dialogo">
     <form id="formulario-anuncios-semanales">
@@ -153,17 +208,10 @@
         Curso
         <select id="campo-curso" required></select>
       </label>
-
-      <div class="fila-campos">
-        <label class="campo">
-          <span class="etiqueta-campo">Fecha de inicio del curso</span>
-          <input type="date" id="campo-fecha-inicio" required>
-        </label>
-        <label class="campo">
-          <span class="etiqueta-campo">Fecha de fin del curso</span>
-          <input type="date" id="campo-fecha-fin" required>
-        </label>
-      </div>
+      <p class="descripcion-dialogo">
+        Solo aparecen los cursos con fecha de inicio y fin ya configuradas desde
+        <strong>Cursos activos</strong>.
+      </p>
 
       <div class="fila-campos">
         <label class="campo">
@@ -190,6 +238,16 @@
       <label class="campo campo-casilla oculto" id="campo-confirmar-fecha-pasada">
         <input type="checkbox" id="casilla-confirmar-fecha-pasada">
         <span>Los anuncios se generarán <strong>solo desde hoy</strong>. Marca esta casilla para <strong>regularizar</strong> e incluir también los anuncios desde la fecha real de inicio del curso.</span>
+      </label>
+
+      <label class="campo campo-casilla oculto" id="campo-regularizar-fecha-manual">
+        <input type="checkbox" id="casilla-regularizar-fecha-manual">
+        <span>O, si prefieres, <strong>regularizar desde una fecha específica</strong> (no necesariamente desde el inicio del curso). Marca esta casilla y elige la fecha. Solo puedes elegir una de las dos opciones.</span>
+      </label>
+
+      <label class="campo oculto" id="campo-fecha-regularizacion-manual">
+        <span class="etiqueta-campo">Fecha desde la cual regularizar</span>
+        <input type="date" id="campo-fecha-regularizacion">
       </label>
 
       <label class="campo campo-casilla campo-alerta" id="campo-eliminar-anuncios-existentes">
@@ -228,6 +286,31 @@
     </div>
   </dialog>
 
+  <dialog id="dialogo-confirmar-blackboard" class="dialogo">
+    <div class="dialogo-contenido">
+      <h2>¿Generar anuncios en Blackboard?</h2>
+      <p class="descripcion-dialogo" id="mensaje-confirmar-blackboard"></p>
+      <div class="botonera">
+        <button type="button" id="boton-confirmar-generar-blackboard" class="boton boton-primario">
+          Sí, generar
+        </button>
+        <button type="button" id="boton-cancelar-generar-blackboard" class="boton boton-secundario">
+          Cancelar
+        </button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="dialogo-resultado-blackboard" class="dialogo">
+    <div class="dialogo-contenido">
+      <h2 id="titulo-resultado-blackboard">Resultado</h2>
+      <p class="descripcion-dialogo" id="mensaje-resultado-blackboard"></p>
+      <div class="botonera botonera-centrada">
+        <button type="button" id="boton-cerrar-resultado-blackboard" class="boton boton-primario">Entendido</button>
+      </div>
+    </div>
+  </dialog>
+
   <dialog id="dialogo-ver-anuncios" class="dialogo dialogo-ancho">
     <div class="dialogo-contenido">
       <h2>Anuncios semanales</h2>
@@ -253,7 +336,119 @@
       </div>
 
       <div class="botonera">
+        <button type="button" id="boton-generar-en-blackboard" class="boton boton-primario">Generar en Blackboard</button>
+        <button type="button" id="boton-exportar-anuncios" class="boton boton-secundario">Exportar</button>
+        <button type="button" id="boton-importar-anuncios" class="boton boton-secundario">Importar</button>
+        <input type="file" id="campo-importar-anuncios" accept=".csv,text/csv" class="oculto">
         <button type="button" id="boton-cerrar-ver-anuncios" class="boton boton-secundario">Cerrar</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="dialogo-sesiones-dictado" class="dialogo">
+    <form id="formulario-sesiones-dictado">
+      <h2>Generar Sesiones Dictado</h2>
+
+      <label class="campo">
+        Curso
+        <select id="campo-curso-sesiones" required></select>
+      </label>
+      <p class="descripcion-dialogo">
+        Solo aparecen los cursos con fecha de inicio y fin ya configuradas desde
+        <strong>Cursos activos</strong>.
+      </p>
+
+      <p class="descripcion-dialogo">
+        Horario semanal de dictado: coloca la hora de inicio y fin en los días
+        que sí hay clase, y deja vacíos los que no.
+      </p>
+      <div id="tabla-horario-semanal" class="tabla-horario-semanal"></div>
+
+      <p class="descripcion-dialogo">
+        Las sesiones de dictado se generarán <strong>solo desde la fecha actual en adelante</strong>,
+        aunque el curso ya haya empezado antes.
+      </p>
+
+      <p id="mensaje-asistente-sesiones" class="mensaje-cursos"></p>
+
+      <div class="botonera">
+        <button type="button" id="boton-guardar-sesiones-dictado" class="boton boton-primario">
+          Guardar
+        </button>
+        <button type="button" id="boton-ver-sesiones-dictado" class="boton boton-secundario" disabled>
+          Ver Sesiones
+        </button>
+        <button type="button" id="boton-cancelar-sesiones-dictado" class="boton boton-secundario">
+          Cancelar
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dialogo-guardado-sesiones-ok" class="dialogo">
+    <div class="dialogo-contenido confirmacion-exito">
+      <div class="icono-confirmacion">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-6"/></svg>
+      </div>
+      <h2>Guardado correctamente</h2>
+      <p class="descripcion-dialogo">
+        Ahora puedes hacer clic en <strong>Ver Sesiones</strong> para ver la grilla generada.
+      </p>
+      <div class="botonera botonera-centrada">
+        <button type="button" id="boton-cerrar-guardado-sesiones-ok" class="boton boton-primario">Entendido</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="dialogo-ver-sesiones" class="dialogo dialogo-ancho">
+    <div class="dialogo-contenido">
+      <h2>Sesiones de dictado</h2>
+      <p class="descripcion-dialogo">
+        Se muestran desde hoy hasta el fin del curso. Las filas en rojo caen en un feriado.
+      </p>
+
+      <div class="tabla-scroll">
+        <table class="tabla-anuncios">
+          <thead>
+            <tr>
+              <th>Nro</th>
+              <th>Sesión</th>
+              <th>Fecha</th>
+              <th>Hora inicio</th>
+              <th>Hora fin</th>
+            </tr>
+          </thead>
+          <tbody id="cuerpo-tabla-sesiones"></tbody>
+        </table>
+      </div>
+
+      <div class="botonera">
+        <button type="button" id="boton-abrir-feriados" class="boton boton-secundario">Feriados</button>
+        <button type="button" id="boton-cerrar-ver-sesiones" class="boton boton-secundario">Cerrar</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="dialogo-feriados" class="dialogo">
+    <div class="dialogo-contenido">
+      <h2>Feriados</h2>
+      <p class="descripcion-dialogo">
+        Feriados considerados para marcar en rojo las sesiones de dictado.
+        Puedes agregar o quitar fechas; los cambios se guardan de inmediato.
+      </p>
+
+      <ul id="lista-feriados" class="lista-feriados"></ul>
+
+      <div class="fila-campos fila-campos-alineada-abajo">
+        <label class="campo">
+          <span class="etiqueta-campo">Agregar feriado</span>
+          <input type="date" id="campo-nuevo-feriado">
+        </label>
+        <button type="button" id="boton-agregar-feriado" class="boton boton-secundario">Agregar</button>
+      </div>
+
+      <div class="botonera">
+        <button type="button" id="boton-cerrar-feriados" class="boton boton-primario">Cerrar</button>
       </div>
     </div>
   </dialog>

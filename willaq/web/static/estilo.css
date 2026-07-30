@@ -353,7 +353,13 @@ html[data-tema="oscuro"] .logo-claro {
   color: var(--acento);
 }
 
-/* --- Columna lateral --- */
+/* --- Columna principal / lateral --- */
+
+.columna-principal {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
 
 .columna-lateral {
   display: flex;
@@ -438,32 +444,6 @@ html[data-tema="oscuro"] .logo-claro {
   flex: 1;
 }
 
-.lista-datos {
-  margin: 0;
-  font-size: 0.85rem;
-}
-
-.lista-datos > div {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 0;
-}
-
-.lista-datos > div:not(:last-child) {
-  border-bottom: 1px solid var(--borde);
-}
-
-.lista-datos dt {
-  color: var(--texto-tenue);
-}
-
-.lista-datos dd {
-  margin: 0;
-  text-align: right;
-  word-break: break-word;
-}
-
 .mensaje {
   font-size: 0.85rem;
   font-weight: 600;
@@ -471,21 +451,64 @@ html[data-tema="oscuro"] .logo-claro {
   padding: 0 4px;
 }
 
+.tarjeta-cursos {
+  padding: 24px;
+}
+
+.cabecera-tarjeta-cursos {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.cabecera-tarjeta-cursos .titulo-tarjeta {
+  margin: 0;
+}
+
+.fecha-obtencion-cursos {
+  font-size: 0.78rem;
+  color: var(--texto-tenue);
+  margin: 0 0 16px 0;
+}
+
+.contador-cursos {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--acento);
+  background-color: var(--fondo-tarjeta-alt);
+  border: 1px solid var(--borde);
+  border-radius: 999px;
+  padding: 4px 12px;
+  white-space: nowrap;
+}
+
 .lista-cursos {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
 }
 
 .lista-cursos li {
-  padding: 8px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--borde);
+  border-radius: var(--radio-chico);
+  background-color: var(--fondo-tarjeta-alt);
+  transition: border-color 0.15s ease;
 }
 
-.lista-cursos li:not(:last-child) {
-  border-bottom: 1px solid var(--borde);
+.lista-cursos li:hover {
+  border-color: var(--acento);
+}
+
+.lista-cursos li.mensaje-cursos {
+  grid-column: 1 / -1;
+  background-color: transparent;
+  border-style: dashed;
 }
 
 .lista-cursos .codigo-curso {
@@ -493,12 +516,46 @@ html[data-tema="oscuro"] .logo-claro {
   font-size: 0.75rem;
   color: var(--texto-tenue);
   font-family: "Menlo", "Consolas", monospace;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
 }
 
 .lista-cursos .nombre-curso {
   display: block;
+  margin-top: 6px;
   font-size: 0.88rem;
   font-weight: 600;
+  line-height: 1.5;
+}
+
+.fechas-curso {
+  display: block;
+  margin-top: 8px;
+  font-size: 0.78rem;
+  color: var(--texto-tenue);
+}
+
+.fechas-curso.sin-configurar {
+  color: var(--aviso);
+  font-weight: 600;
+}
+
+.boton-fechas-curso {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  background-color: var(--fondo-tarjeta-alt);
+  color: var(--acento);
+  border: 1px solid var(--borde);
+  border-radius: var(--radio-chico);
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.boton-fechas-curso:hover {
+  border-color: var(--acento);
 }
 
 .mensaje-cursos {
@@ -716,4 +773,87 @@ html[data-tema="oscuro"] .logo-claro {
   display: flex;
   align-items: flex-end;
   min-height: 2.2em;
+}
+
+/* --- Horario semanal (Generar Sesiones Dictado) --- */
+
+.tabla-horario-semanal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fila-horario-dia {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fila-horario-dia .nombre-dia {
+  width: 90px;
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.fila-horario-dia input[type="time"] {
+  flex: 1;
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 6px 8px;
+  border-radius: var(--radio-chico);
+  border: 1px solid var(--borde);
+  background-color: var(--fondo-tarjeta-alt);
+  color: var(--texto);
+}
+
+/* --- Sesiones de dictado: filas que caen en feriado --- */
+
+.fila-feriado td {
+  background-color: rgba(252, 31, 41, 0.12);
+}
+
+.fila-feriado .celda-editable {
+  color: var(--error);
+  font-weight: 600;
+}
+
+/* --- Feriados --- */
+
+.lista-feriados {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.lista-feriados li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 0.85rem;
+}
+
+.lista-feriados li:not(:last-child) {
+  border-bottom: 1px solid var(--borde);
+}
+
+.lista-feriados .boton-quitar-feriado {
+  background: transparent;
+  border: none;
+  color: var(--error);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 2px 8px;
+}
+
+.fila-campos.fila-campos-alineada-abajo {
+  align-items: flex-end;
 }

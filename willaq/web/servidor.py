@@ -20,13 +20,29 @@ import webbrowser
 from flask import Flask, jsonify, render_template, request, send_file
 
 from willaq.anuncios.plantilla import generar_plantilla
-from willaq.anuncios.semanal import guardar_configuracion_semanal, obtener_configuracion_semanal
+from willaq.anuncios.publicar import generar_anuncios_en_blackboard
+from willaq.anuncios.semanal import (
+    guardar_configuracion_semanal,
+    obtener_configuracion_semanal,
+    reiniciar_configuraciones as reiniciar_anuncios_semanales,
+)
 from willaq.autenticacion.login import (
     RUTA_AVATAR_DOCENTE,
     cargar_estado_sesion_guardado,
     ejecutar_login,
 )
+from willaq.cursos.fechas import (
+    guardar_fechas_curso,
+    obtener_todas_las_fechas,
+    reiniciar_configuraciones as reiniciar_fechas_cursos,
+)
 from willaq.cursos.listar import cargar_cursos_guardados, obtener_cursos_activos
+from willaq.dictado.feriados import guardar_feriados, obtener_feriados
+from willaq.dictado.sesiones import (
+    guardar_configuracion_sesiones,
+    obtener_configuracion_sesiones,
+    reiniciar_configuraciones as reiniciar_sesiones_dictado,
+)
 from willaq.web.estado import estado_cursos, estado_login
 
 
@@ -103,6 +119,42 @@ def crear_app() -> Flask:
     def consultar_anuncios_semanales_web(codigo_curso):
         return jsonify(obtener_configuracion_semanal(codigo_curso) or {})
 
+    @app.post("/api/anuncios-semanales/generar-en-blackboard")
+    def generar_anuncios_en_blackboard_web():
+        datos = request.get_json(silent=True) or {}
+        resultado = generar_anuncios_en_blackboard(datos.get("id_curso"), datos.get("anuncios") or [])
+        return jsonify(resultado)
+
+    @app.post("/api/sesiones-dictado/guardar")
+    def guardar_sesiones_dictado_web():
+        datos = request.get_json(silent=True) or {}
+        resultado = guardar_configuracion_sesiones(datos)
+        return jsonify(resultado)
+
+    @app.get("/api/sesiones-dictado/<codigo_curso>")
+    def consultar_sesiones_dictado_web(codigo_curso):
+        return jsonify(obtener_configuracion_sesiones(codigo_curso) or {})
+
+    @app.get("/api/feriados")
+    def consultar_feriados_web():
+        return jsonify({"feriados": obtener_feriados()})
+
+    @app.post("/api/feriados")
+    def guardar_feriados_web():
+        datos = request.get_json(silent=True) or {}
+        resultado = guardar_feriados(datos.get("feriados") or [])
+        return jsonify(resultado)
+
+    @app.get("/api/cursos/fechas")
+    def consultar_fechas_cursos_web():
+        return jsonify(obtener_todas_las_fechas())
+
+    @app.post("/api/cursos/fechas/guardar")
+    def guardar_fechas_curso_web():
+        datos = request.get_json(silent=True) or {}
+        resultado = guardar_fechas_curso(datos)
+        return jsonify(resultado)
+
     @app.post("/api/cursos/obtener")
     def iniciar_obtener_cursos():
         if estado_cursos.en_progreso:
@@ -166,9 +218,23 @@ def _obtener_cursos_en_hilo():
     def notificar(mensaje):
         estado_cursos.agregar_log(mensaje)
 
+    info_actualizacion = {}
     try:
-        cursos = obtener_cursos_activos(notificar=notificar)
-        estado_cursos.marcar_terminado("ok", cursos=cursos)
+        cursos = obtener_cursos_activos(notificar=notificar, info_actualizacion=info_actualizacion)
+        if info_actualizacion.get("actualizado"):
+            # La lista de cursos es la base de "Generar Anuncios Semanales" y
+            # "Generar Sesiones Dictado" (que a su vez dependen de las fechas
+            # de cada curso): al renovarla de verdad (no cuando se mantuvo la
+            # lista guardada por un fallo), se reinicia también la
+            # configuración guardada de las tres, como se advierte en el
+            # modal de confirmación antes de obtener los cursos.
+            reiniciar_fechas_cursos()
+            reiniciar_anuncios_semanales()
+            reiniciar_sesiones_dictado()
+            notificar("Se reinició la configuración de fechas de curso, Anuncios Semanales y Sesiones Dictado.")
+        guardado = cargar_cursos_guardados()
+        obtenido_en = guardado.get("obtenido_en") if guardado else None
+        estado_cursos.marcar_terminado("ok", cursos=cursos, obtenido_en=obtenido_en)
     except Exception as error:
         estado_cursos.agregar_log(f"[ERROR] Ocurrió un problema inesperado: {error}")
         estado_cursos.marcar_terminado("error", error=str(error))
@@ -199,9 +265,9 @@ def _restaurar_cursos_guardados():
     presiona "Obtener" otra vez, pero así no se pierde la última lista
     encontrada solo por haber reiniciado el panel.
     """
-    cursos_guardados = cargar_cursos_guardados()
-    if cursos_guardados is not None:
-        estado_cursos.marcar_terminado("ok", cursos=cursos_guardados)
+    guardado = cargar_cursos_guardados()
+    if guardado is not None:
+        estado_cursos.marcar_terminado("ok", cursos=guardado.get("cursos") or [], obtenido_en=guardado.get("obtenido_en"))
 
 
 def iniciar_panel(host: str = "127.0.0.1", puerto: int = 5000):

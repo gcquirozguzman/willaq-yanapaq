@@ -114,12 +114,37 @@ Esto abre automáticamente una pestaña en tu navegador
 - **Obtener Cursos Activos**: lista tus cursos abiertos en Blackboard
   (se habilita después de iniciar sesión). El panel recuerda la última
   lista obtenida entre reinicios, aunque conviene volver a pedirla de vez
-  en cuando por si tus cursos cambiaron.
+  en cuando por si tus cursos cambiaron. Pide confirmación antes de
+  lanzarse, ya que renovar la lista reinicia también las fechas de curso,
+  Generar Anuncios Semanales y Generar Sesiones Dictado (ver abajo).
+  Cada curso obtenido aparece como una tarjeta con un botón para
+  **configurar su fecha de inicio y fin**; esa es la fecha que usan
+  "Generar Anuncios Semanales" y "Generar Sesiones Dictado", así que hay
+  que configurarla una sola vez por curso antes de poder usar esas dos
+  herramientas (mientras no la configures, aparecen bloqueadas).
 - **Generar Anuncios Semanales**: abre un formulario para elegir un curso
-  (de los que obtuviste con "Obtener Cursos Activos") y configurar sus
-  fechas y el día/hora de los anuncios de inicio y fin de semana. Por
-  ahora guarda esa configuración; calcular y generar el Excel con cada
-  semana es un paso futuro.
+  (solo aparecen los que ya tienen su fecha de inicio/fin configurada
+  desde "Cursos activos") y el día/hora de los anuncios de inicio y fin
+  de semana. Dentro del mismo formulario:
+  - **Ver anuncios**: muestra una grilla editable con un anuncio de inicio
+    y uno de fin por cada semana del curso (título, mensaje, fecha y
+    hora), con textos de ejemplo listos para editar.
+  - **Generar en Blackboard**: toma exactamente lo que ves en esa grilla
+    (con cualquier edición que hayas hecho) y crea cada fila como un
+    anuncio real dentro de "Anuncios" del curso en Blackboard, programado
+    para la fecha y hora indicadas. Pide confirmación antes de publicar,
+    ya que crea contenido real visible para tus estudiantes.
+- **Generar Sesiones Dictado**: similar al anterior, pero para el horario
+  de clases: eliges un curso (con la misma condición de fecha ya
+  configurada) y a qué hora dicta cada día de la semana (los días sin
+  clase se dejan vacíos). Dentro del mismo formulario:
+  - **Ver Sesiones**: genera la grilla de sesiones (una por cada día con
+    clase, con el nombre "SESIÓN NN - <curso> (<código>) - <tu nombre>"),
+    siempre desde la fecha actual en adelante, nunca desde el pasado.
+  - **Feriados**: un listado editable de los feriados peruanos del año
+    actual (con Semana Santa calculada según la fecha real de Pascua de
+    ese año), para agregar o quitar fechas a demanda. Las sesiones que
+    caen en un feriado se resaltan en rojo en la grilla.
 
 La ventana del navegador de Blackboard (donde completas tu usuario, clave
 y el código SMS la primera vez) se sigue abriendo aparte, como una ventana
@@ -254,9 +279,13 @@ willaq/
 ├── anuncios/
 │   ├── plantilla.py         # Genera el Excel de ejemplo (implementado)
 │   ├── semanal.py           # Guarda la config. de anuncios semanales (implementado)
-│   └── publicar.py          # Publicar anuncios en Blackboard (pendiente)
+│   └── publicar.py          # Publica los anuncios en Blackboard (implementado)
 ├── cursos/
-│   └── listar.py            # Lista de cursos activos (implementado)
+│   ├── listar.py            # Lista de cursos activos (implementado)
+│   └── fechas.py            # Fecha de inicio/fin por curso (implementado)
+├── dictado/
+│   ├── sesiones.py           # Guarda la config. de sesiones de dictado (implementado)
+│   └── feriados.py           # Feriados peruanos, editables (implementado)
 ├── consulta_docente/
 │   └── consulta.py          # Consulta al docente (pendiente)
 ├── presentacion/

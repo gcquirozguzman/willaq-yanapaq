@@ -88,6 +88,7 @@ class EstadoCursos:
 
     def __init__(self):
         self._candado = threading.Lock()
+        self.obtenido_en = None
         self._reiniciar_sin_candado()
 
     def _reiniciar_sin_candado(self):
@@ -97,6 +98,9 @@ class EstadoCursos:
         self.resultado = None  # None | "ok" | "error"
         self.cursos = []
         self.error = None
+        # Nota: 'obtenido_en' NO se reinicia aquí a propósito, para que la
+        # fecha mostrada en el panel no desaparezca mientras corre una nueva
+        # búsqueda (se actualiza recién cuando esa búsqueda termina bien).
 
     def iniciar(self):
         with self._candado:
@@ -108,13 +112,15 @@ class EstadoCursos:
         with self._candado:
             self.logs.append(mensaje)
 
-    def marcar_terminado(self, resultado: str, cursos: list = None, error: str = None):
+    def marcar_terminado(self, resultado: str, cursos: list = None, error: str = None, obtenido_en: str = None):
         with self._candado:
             self.en_progreso = False
             self.fase = "terminado"
             self.resultado = resultado
             self.cursos = cursos or []
             self.error = error
+            if obtenido_en is not None:
+                self.obtenido_en = obtenido_en
 
     def snapshot(self) -> dict:
         with self._candado:
@@ -125,6 +131,7 @@ class EstadoCursos:
                 "resultado": self.resultado,
                 "cursos": list(self.cursos),
                 "error": self.error,
+                "obtenido_en": self.obtenido_en,
             }
 
 
