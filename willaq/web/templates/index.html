@@ -416,7 +416,9 @@
       <p class="descripcion-dialogo">
         Se muestran desde el inicio hasta el fin del curso. Las filas en rojo caen en un feriado;
         las filas en amarillo fueron reprogramadas (usa "Detalle" para ver su fecha y hora original).
-        "Generar en Blackboard" solo publica, como anuncios reales, las sesiones desde hoy en adelante.
+        "Generar en Blackboard" solo crea, como sesiones reales de Collaborate, las sesiones desde hoy en adelante.
+        "Eliminar sesiones no iniciadas" borra de Blackboard, de las que ya se hayan creado, únicamente las que
+        todavía no han comenzado; nunca toca una sesión que ya esté en curso o que ya haya finalizado.
       </p>
 
       <div class="tabla-scroll">
@@ -438,8 +440,26 @@
         <button type="button" id="boton-generar-sesiones-en-blackboard" class="boton boton-primario">
           Generar en Blackboard
         </button>
+        <button type="button" id="boton-eliminar-sesiones-no-iniciadas" class="boton boton-peligro">
+          Eliminar sesiones no iniciadas
+        </button>
         <button type="button" id="boton-abrir-feriados" class="boton boton-secundario">Feriados</button>
         <button type="button" id="boton-cerrar-ver-sesiones" class="boton boton-secundario">Cerrar</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="dialogo-confirmar-eliminar-sesiones" class="dialogo">
+    <div class="dialogo-contenido">
+      <h2>¿Eliminar sesiones no iniciadas?</h2>
+      <p class="descripcion-dialogo" id="mensaje-confirmar-eliminar-sesiones"></p>
+      <div class="botonera">
+        <button type="button" id="boton-confirmar-eliminar-sesiones" class="boton boton-peligro">
+          Sí, eliminar
+        </button>
+        <button type="button" id="boton-cancelar-eliminar-sesiones" class="boton boton-secundario">
+          Cancelar
+        </button>
       </div>
     </div>
   </dialog>

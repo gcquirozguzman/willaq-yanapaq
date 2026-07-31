@@ -38,7 +38,7 @@ from willaq.cursos.fechas import (
 )
 from willaq.cursos.listar import cargar_cursos_guardados, obtener_cursos_activos
 from willaq.dictado.feriados import guardar_feriados, obtener_feriados
-from willaq.dictado.publicar import generar_sesiones_en_blackboard
+from willaq.dictado.publicar import eliminar_sesiones_en_blackboard, generar_sesiones_en_blackboard
 from willaq.dictado.reprogramaciones import (
     guardar_reprogramacion,
     obtener_reprogramaciones_curso,
@@ -154,6 +154,12 @@ def crear_app() -> Flask:
     def generar_sesiones_en_blackboard_web():
         datos = request.get_json(silent=True) or {}
         resultado = generar_sesiones_en_blackboard(datos.get("id_curso"), datos.get("sesiones") or [])
+        return jsonify(resultado)
+
+    @app.post("/api/sesiones-dictado/eliminar-en-blackboard")
+    def eliminar_sesiones_en_blackboard_web():
+        datos = request.get_json(silent=True) or {}
+        resultado = eliminar_sesiones_en_blackboard(datos.get("id_curso"))
         return jsonify(resultado)
 
     @app.post("/api/sesiones-dictado/reprogramar")

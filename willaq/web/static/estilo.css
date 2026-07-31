@@ -273,6 +273,15 @@ html[data-tema="oscuro"] .logo-claro {
   color: var(--acento);
 }
 
+.boton-peligro {
+  background-color: var(--error);
+  color: #ffffff;
+}
+
+.boton-peligro:hover {
+  opacity: 0.9;
+}
+
 .boton-pequeno {
   background-color: var(--fondo-tarjeta-alt);
   color: var(--acento);

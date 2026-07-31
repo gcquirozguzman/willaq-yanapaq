@@ -148,10 +148,11 @@ Esto abre automáticamente una pestaña en tu navegador
     actual (con Semana Santa calculada según la fecha real de Pascua de
     ese año), para agregar o quitar fechas a demanda. Las sesiones que
     caen en un feriado se resaltan en rojo en la grilla.
-  - **Generar en Blackboard**: publica, como anuncios reales programados
-    (igual que "Generar Anuncios Semanales"), solo las sesiones desde hoy
-    en adelante; las que ya pasaron no se publican. Pide confirmación antes
-    de publicar, ya que crea contenido real visible para tus estudiantes.
+  - **Generar en Blackboard**: crea, como sesiones reales de Blackboard
+    Collaborate (automatizando "Administrar todas las sesiones" > "Crear
+    sesión" del curso), solo las sesiones desde hoy en adelante; las que ya
+    pasaron no se crean. Pide confirmación antes de generar, ya que crea
+    contenido real visible para tus estudiantes.
 
 La ventana del navegador de Blackboard (donde completas tu usuario, clave
 y el código SMS la primera vez) se sigue abriendo aparte, como una ventana

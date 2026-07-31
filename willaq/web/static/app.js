@@ -1464,9 +1464,15 @@ const botonCerrarGuardadoSesionesOk = document.getElementById("boton-cerrar-guar
 const dialogoVerSesiones = document.getElementById("dialogo-ver-sesiones");
 const cuerpoTablaSesiones = document.getElementById("cuerpo-tabla-sesiones");
 const botonGenerarSesionesEnBlackboard = document.getElementById("boton-generar-sesiones-en-blackboard");
+const botonEliminarSesionesNoIniciadas = document.getElementById("boton-eliminar-sesiones-no-iniciadas");
 const botonAbrirFeriados = document.getElementById("boton-abrir-feriados");
 const botonAbrirFeriadosTool = document.getElementById("boton-abrir-feriados-tool");
 const botonCerrarVerSesiones = document.getElementById("boton-cerrar-ver-sesiones");
+
+const dialogoConfirmarEliminarSesiones = document.getElementById("dialogo-confirmar-eliminar-sesiones");
+const mensajeConfirmarEliminarSesiones = document.getElementById("mensaje-confirmar-eliminar-sesiones");
+const botonConfirmarEliminarSesiones = document.getElementById("boton-confirmar-eliminar-sesiones");
+const botonCancelarEliminarSesiones = document.getElementById("boton-cancelar-eliminar-sesiones");
 
 const dialogoReprogramarSesion = document.getElementById("dialogo-reprogramar-sesion");
 const nombreSesionReprogramar = document.getElementById("nombre-sesion-reprogramar");
@@ -1856,12 +1862,13 @@ botonVerSesiones.addEventListener("click", abrirVistaSesiones);
 botonCerrarVerSesiones.addEventListener("click", () => dialogoVerSesiones.close());
 
 // --- Generar Sesiones en Blackboard ---
-// Mismo mecanismo que "Generar en Blackboard" de Anuncios Semanales (cada
-// fila se crea como un anuncio real programado): reutiliza el mismo
-// diálogo de confirmación y de resultado. Solo se publican las sesiones
-// desde HOY en adelante (las pasadas ya sucedieron, no tiene sentido
-// "programarlas" en Blackboard), tomando la fecha/hora ya reprogramada si
-// corresponde.
+// Cada fila se crea como una sesión real de Blackboard Collaborate (no un
+// anuncio: es una herramienta distinta dentro de Blackboard). Reutiliza el
+// mismo diálogo de confirmación y de resultado que "Generar en Blackboard"
+// de Anuncios Semanales, pero llama a un endpoint propio que automatiza el
+// formulario de Collaborate (ver willaq/dictado/publicar.py). Solo se
+// crean las sesiones desde HOY en adelante (las pasadas ya sucedieron),
+// tomando la fecha/hora ya reprogramada si corresponde.
 async function generarSesionesEnBlackboard() {
   if (!configuracionSesionesActual) {
     return;
@@ -1886,7 +1893,6 @@ async function generarSesionesEnBlackboard() {
       fecha: sesion.fecha,
       hora_inicio: sesion.horaInicio,
       hora_fin: sesion.horaFin,
-      detalle: sesion.modificado ? sesion.detalleCambio : "",
     }));
 
   if (sesionesAGenerar.length === 0) {
@@ -1895,7 +1901,7 @@ async function generarSesionesEnBlackboard() {
   }
 
   const confirmado = await confirmarGenerarEnBlackboard(
-    `Esto creará ${sesionesAGenerar.length} sesión(es) como anuncios reales en Blackboard, en el curso ` +
+    `Esto creará ${sesionesAGenerar.length} sesión(es) reales de Blackboard Collaborate, en el curso ` +
       `"${cursoInfo.nombre}", desde hoy en adelante. ¿Deseas continuar?`
   );
   if (!confirmado) {
@@ -1919,7 +1925,7 @@ async function generarSesionesEnBlackboard() {
       return;
     }
 
-    let mensajeResultado = `Se publicaron ${resultado.publicados} de ${sesionesAGenerar.length} sesión(es) en Blackboard.`;
+    let mensajeResultado = `Se crearon ${resultado.publicados} de ${sesionesAGenerar.length} sesión(es) de Collaborate en Blackboard.`;
     if (resultado.fallidos && resultado.fallidos.length > 0) {
       mensajeResultado += ` No se pudieron publicar: ${resultado.fallidos.join(", ")}.`;
     }
@@ -1934,6 +1940,96 @@ async function generarSesionesEnBlackboard() {
 }
 
 botonGenerarSesionesEnBlackboard.addEventListener("click", generarSesionesEnBlackboard);
+
+// --- Eliminar sesiones no iniciadas de Blackboard ---
+// Contraparte de "Generar en Blackboard": no calcula nombres localmente,
+// entra a la lista real de Collaborate del curso y elimina las que
+// Blackboard mismo marca como "(aún no ha comenzado)" (ver
+// willaq/dictado/publicar.py). Nunca incluye una sesión que ya comenzó,
+// que ya finalizó, ni la sala del curso. Usa su propio diálogo de
+// confirmación (no el genérico de "Generar"), porque es una acción
+// destructiva y el texto/botón deben dejarlo clarísimo.
+function confirmarEliminarSesiones(mensaje) {
+  return new Promise((resolve) => {
+    mensajeConfirmarEliminarSesiones.textContent = mensaje;
+
+    function aceptar() {
+      limpiar();
+      dialogoConfirmarEliminarSesiones.close();
+      resolve(true);
+    }
+    function cancelar() {
+      limpiar();
+      dialogoConfirmarEliminarSesiones.close();
+      resolve(false);
+    }
+    function limpiar() {
+      botonConfirmarEliminarSesiones.removeEventListener("click", aceptar);
+      botonCancelarEliminarSesiones.removeEventListener("click", cancelar);
+    }
+
+    botonConfirmarEliminarSesiones.addEventListener("click", aceptar);
+    botonCancelarEliminarSesiones.addEventListener("click", cancelar);
+    dialogoConfirmarEliminarSesiones.showModal();
+  });
+}
+
+async function eliminarSesionesNoIniciadas() {
+  if (!configuracionSesionesActual) {
+    return;
+  }
+
+  const codigoCurso = configuracionSesionesActual.curso_codigo;
+  const cursoInfo = cursosObtenidos.find((curso) => curso.codigo === codigoCurso);
+  if (!cursoInfo || !cursoInfo.id) {
+    mostrarResultadoBlackboard(
+      "No se pudo identificar el curso",
+      'Vuelve a hacer clic en "Obtener Cursos Activos" para actualizar la lista de cursos, y luego intenta de nuevo.'
+    );
+    return;
+  }
+
+  const confirmado = await confirmarEliminarSesiones(
+    `Esto entrará a Blackboard, en el curso "${cursoInfo.nombre}", y eliminará TODAS las sesiones de Collaborate ` +
+      `que Blackboard mismo marque como que aún no han comenzado. No se tocará ninguna sesión que ya esté en curso, ` +
+      `que ya haya finalizado, ni la sala del curso. Esta acción no se puede deshacer. ¿Deseas continuar?`
+  );
+  if (!confirmado) {
+    return;
+  }
+
+  botonEliminarSesionesNoIniciadas.disabled = true;
+  const textoOriginal = botonEliminarSesionesNoIniciadas.textContent;
+  botonEliminarSesionesNoIniciadas.textContent = "Eliminando...";
+
+  try {
+    const respuesta = await fetch("/api/sesiones-dictado/eliminar-en-blackboard", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id_curso: cursoInfo.id }),
+    });
+    const resultado = await respuesta.json();
+
+    if (resultado.estado === "error" && !resultado.eliminados) {
+      mostrarResultadoBlackboard("No se pudo eliminar", resultado.error || "No se pudo eliminar las sesiones en Blackboard.");
+      return;
+    }
+
+    let mensajeResultado = `Se eliminaron ${resultado.eliminados} sesión(es) de Collaborate en Blackboard que aún no habían comenzado.`;
+    if (resultado.fallidos && resultado.fallidos.length > 0) {
+      mensajeResultado += ` No se pudieron eliminar: ${resultado.fallidos.join(", ")}.`;
+    }
+    mostrarResultadoBlackboard(
+      resultado.fallidos && resultado.fallidos.length > 0 ? "Eliminado con avisos" : "Listo",
+      mensajeResultado
+    );
+  } finally {
+    botonEliminarSesionesNoIniciadas.disabled = false;
+    botonEliminarSesionesNoIniciadas.textContent = textoOriginal;
+  }
+}
+
+botonEliminarSesionesNoIniciadas.addEventListener("click", eliminarSesionesNoIniciadas);
 
 // --- Reprogramar / ver detalle de una sesión puntual ---
 
