@@ -50,7 +50,13 @@ from willaq.dictado.sesiones import (
     obtener_todas_las_configuraciones as obtener_todas_las_sesiones,
     reiniciar_configuraciones as reiniciar_sesiones_dictado,
 )
-from willaq.web.estado import estado_cursos, estado_login
+from willaq.web.estado import (
+    estado_cursos,
+    estado_eliminar_sesiones,
+    estado_generar_anuncios,
+    estado_generar_sesiones,
+    estado_login,
+)
 
 
 def _detectar_tipo_imagen(ruta) -> str:
@@ -127,10 +133,24 @@ def crear_app() -> Flask:
         return jsonify(obtener_configuracion_semanal(codigo_curso) or {})
 
     @app.post("/api/anuncios-semanales/generar-en-blackboard")
-    def generar_anuncios_en_blackboard_web():
+    def iniciar_generar_anuncios_en_blackboard():
+        if estado_generar_anuncios.en_progreso:
+            return jsonify({"error": "Ya se está generando en Blackboard."}), 409
+
         datos = request.get_json(silent=True) or {}
-        resultado = generar_anuncios_en_blackboard(datos.get("id_curso"), datos.get("anuncios") or [])
-        return jsonify(resultado)
+        anuncios = datos.get("anuncios") or []
+        estado_generar_anuncios.iniciar(total=len(anuncios))
+        hilo = threading.Thread(
+            target=_generar_anuncios_en_blackboard_en_hilo,
+            args=(datos.get("id_curso"), anuncios),
+            daemon=True,
+        )
+        hilo.start()
+        return jsonify({"ok": True})
+
+    @app.get("/api/anuncios-semanales/generar-en-blackboard/estado")
+    def consultar_estado_generar_anuncios():
+        return jsonify(estado_generar_anuncios.snapshot())
 
     @app.post("/api/sesiones-dictado/guardar")
     def guardar_sesiones_dictado_web():
@@ -151,16 +171,43 @@ def crear_app() -> Flask:
         return jsonify(obtener_reprogramaciones_curso(codigo_curso))
 
     @app.post("/api/sesiones-dictado/generar-en-blackboard")
-    def generar_sesiones_en_blackboard_web():
+    def iniciar_generar_sesiones_en_blackboard():
+        if estado_generar_sesiones.en_progreso:
+            return jsonify({"error": "Ya se está generando en Blackboard."}), 409
+
         datos = request.get_json(silent=True) or {}
-        resultado = generar_sesiones_en_blackboard(datos.get("id_curso"), datos.get("sesiones") or [])
-        return jsonify(resultado)
+        sesiones = datos.get("sesiones") or []
+        estado_generar_sesiones.iniciar(total=len(sesiones))
+        hilo = threading.Thread(
+            target=_generar_sesiones_en_blackboard_en_hilo,
+            args=(datos.get("id_curso"), sesiones),
+            daemon=True,
+        )
+        hilo.start()
+        return jsonify({"ok": True})
+
+    @app.get("/api/sesiones-dictado/generar-en-blackboard/estado")
+    def consultar_estado_generar_sesiones():
+        return jsonify(estado_generar_sesiones.snapshot())
 
     @app.post("/api/sesiones-dictado/eliminar-en-blackboard")
-    def eliminar_sesiones_en_blackboard_web():
+    def iniciar_eliminar_sesiones_en_blackboard():
+        if estado_eliminar_sesiones.en_progreso:
+            return jsonify({"error": "Ya se está eliminando en Blackboard."}), 409
+
         datos = request.get_json(silent=True) or {}
-        resultado = eliminar_sesiones_en_blackboard(datos.get("id_curso"))
-        return jsonify(resultado)
+        estado_eliminar_sesiones.iniciar()
+        hilo = threading.Thread(
+            target=_eliminar_sesiones_en_blackboard_en_hilo,
+            args=(datos.get("id_curso"),),
+            daemon=True,
+        )
+        hilo.start()
+        return jsonify({"ok": True})
+
+    @app.get("/api/sesiones-dictado/eliminar-en-blackboard/estado")
+    def consultar_estado_eliminar_sesiones():
+        return jsonify(estado_eliminar_sesiones.snapshot())
 
     @app.post("/api/sesiones-dictado/reprogramar")
     def guardar_reprogramacion_web():
@@ -272,6 +319,62 @@ def _obtener_cursos_en_hilo():
     except Exception as error:
         estado_cursos.agregar_log(f"[ERROR] Ocurrió un problema inesperado: {error}")
         estado_cursos.marcar_terminado("error", error=str(error))
+
+
+def _generar_anuncios_en_blackboard_en_hilo(id_curso, anuncios):
+    """Corre la publicación de anuncios en un hilo aparte, igual que el login."""
+
+    def notificar(mensaje):
+        estado_generar_anuncios.agregar_log(mensaje)
+        # "Creando anuncio: ..." se emite una sola vez por cada anuncio, justo
+        # antes de intentarlo (ver willaq/anuncios/publicar.py): contar esas
+        # líneas es lo que le permite al panel mostrar "N de M" en la rueda
+        # de carga en vez de una animación sin ninguna señal de avance.
+        if mensaje.startswith("Creando anuncio:"):
+            estado_generar_anuncios.incrementar_procesados()
+
+    try:
+        resultado = generar_anuncios_en_blackboard(id_curso, anuncios, notificar=notificar)
+        estado_generar_anuncios.marcar_terminado(resultado=resultado)
+    except Exception as error:
+        estado_generar_anuncios.agregar_log(f"[ERROR] Ocurrió un problema inesperado: {error}")
+        estado_generar_anuncios.marcar_terminado(error=str(error))
+
+
+def _generar_sesiones_en_blackboard_en_hilo(id_curso, sesiones):
+    """Corre la creación de sesiones de Collaborate en un hilo aparte."""
+
+    def notificar(mensaje):
+        estado_generar_sesiones.agregar_log(mensaje)
+        if mensaje.startswith("Creando sesión de Collaborate:"):
+            estado_generar_sesiones.incrementar_procesados()
+
+    try:
+        resultado = generar_sesiones_en_blackboard(id_curso, sesiones, notificar=notificar)
+        estado_generar_sesiones.marcar_terminado(resultado=resultado)
+    except Exception as error:
+        estado_generar_sesiones.agregar_log(f"[ERROR] Ocurrió un problema inesperado: {error}")
+        estado_generar_sesiones.marcar_terminado(error=str(error))
+
+
+def _eliminar_sesiones_en_blackboard_en_hilo(id_curso):
+    """Corre el barrido de eliminación de sesiones de Collaborate en un hilo aparte."""
+
+    def notificar(mensaje):
+        estado_eliminar_sesiones.agregar_log(mensaje)
+        # No hay un total conocido de antemano (es un barrido: se va
+        # descubriendo qué eliminar), así que aquí 'procesados' solo sirve
+        # para mostrar un contador ("N eliminadas hasta el momento"), no un
+        # porcentaje.
+        if mensaje.startswith("Eliminando sesión de Collaborate:"):
+            estado_eliminar_sesiones.incrementar_procesados()
+
+    try:
+        resultado = eliminar_sesiones_en_blackboard(id_curso, notificar=notificar)
+        estado_eliminar_sesiones.marcar_terminado(resultado=resultado)
+    except Exception as error:
+        estado_eliminar_sesiones.agregar_log(f"[ERROR] Ocurrió un problema inesperado: {error}")
+        estado_eliminar_sesiones.marcar_terminado(error=str(error))
 
 
 def _restaurar_sesion_guardada():

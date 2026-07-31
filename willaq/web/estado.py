@@ -135,7 +135,78 @@ class EstadoCursos:
             }
 
 
+class EstadoTarea:
+    """Estado genérico para una tarea de fondo que abre el navegador.
+
+    A diferencia de EstadoLogin/EstadoCursos (que llevan campos propios
+    como 'nombre_docente' o 'cursos'), esta clase sirve para cualquier
+    acción que simplemente corre en un hilo aparte y al final entrega un
+    resultado en forma de diccionario (por ejemplo, {"publicados": N,
+    "fallidos": [...]})); se usa para las acciones que publican o eliminan
+    cosas reales en Blackboard (anuncios semanales, sesiones de dictado),
+    que antes bloqueaban la petición HTTP mientras Playwright corría, sin
+    poder mostrar ninguna señal de progreso en el panel mientras tanto.
+    """
+
+    def __init__(self):
+        self._candado = threading.Lock()
+        self._reiniciar_sin_candado()
+
+    def _reiniciar_sin_candado(self):
+        self.en_progreso = False
+        self.logs = []
+        self.fase = "inactivo"  # inactivo | ejecutando | terminado
+        self.resultado = None
+        self.error = None
+        # 'total' es cuántos elementos hay que procesar (se sabe de
+        # antemano cuando se publica una lista concreta de anuncios o
+        # sesiones); queda en None cuando no se sabe (el barrido de
+        # "eliminar sesiones no iniciadas" no tiene un total fijo, va
+        # descubriendo qué eliminar sobre la marcha). 'procesados' cuenta
+        # cuántos elementos ya se empezaron a procesar, sin importar si
+        # terminaron bien o mal.
+        self.total = None
+        self.procesados = 0
+
+    def iniciar(self, total: int = None):
+        with self._candado:
+            self._reiniciar_sin_candado()
+            self.en_progreso = True
+            self.fase = "ejecutando"
+            self.total = total
+
+    def agregar_log(self, mensaje: str):
+        with self._candado:
+            self.logs.append(mensaje)
+
+    def incrementar_procesados(self):
+        with self._candado:
+            self.procesados += 1
+
+    def marcar_terminado(self, resultado: dict = None, error: str = None):
+        with self._candado:
+            self.en_progreso = False
+            self.fase = "terminado"
+            self.resultado = resultado
+            self.error = error
+
+    def snapshot(self) -> dict:
+        with self._candado:
+            return {
+                "en_progreso": self.en_progreso,
+                "logs": list(self.logs),
+                "fase": self.fase,
+                "resultado": self.resultado,
+                "error": self.error,
+                "total": self.total,
+                "procesados": self.procesados,
+            }
+
+
 # Una sola instancia compartida por todo el panel web
 # (un solo docente, un solo proceso corriendo en su máquina).
 estado_login = EstadoLogin()
 estado_cursos = EstadoCursos()
+estado_generar_anuncios = EstadoTarea()
+estado_generar_sesiones = EstadoTarea()
+estado_eliminar_sesiones = EstadoTarea()

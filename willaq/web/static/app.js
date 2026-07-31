@@ -1052,6 +1052,8 @@ const dialogoResultadoBlackboard = document.getElementById("dialogo-resultado-bl
 const tituloResultadoBlackboard = document.getElementById("titulo-resultado-blackboard");
 const mensajeResultadoBlackboard = document.getElementById("mensaje-resultado-blackboard");
 const botonCerrarResultadoBlackboard = document.getElementById("boton-cerrar-resultado-blackboard");
+const cargandoGenerarAnuncios = document.getElementById("cargando-generar-anuncios");
+const textoCargandoGenerarAnuncios = document.getElementById("texto-cargando-generar-anuncios");
 
 function mostrarResultadoBlackboard(titulo, mensaje) {
   tituloResultadoBlackboard.textContent = titulo;
@@ -1060,6 +1062,78 @@ function mostrarResultadoBlackboard(titulo, mensaje) {
 }
 
 botonCerrarResultadoBlackboard.addEventListener("click", () => dialogoResultadoBlackboard.close());
+
+// Con el total ya conocido (cuántos anuncios/sesiones se van a procesar) se
+// puede mostrar "N de M (X%)"; sin total (el barrido de "eliminar sesiones
+// no iniciadas" no sabe de antemano cuántas va a encontrar) se muestra solo
+// un contador. Devuelve null si todavía no hay ningún avance que mostrar,
+// para dejar el texto inicial ("Publicando...") tal como está.
+function formatearProgresoTarea(estado) {
+  if (estado.total) {
+    const porcentaje = Math.min(100, Math.round((estado.procesados / estado.total) * 100));
+    return `Procesando ${estado.procesados} de ${estado.total} (${porcentaje}%)...`;
+  }
+  if (estado.procesados > 0) {
+    return `Procesando... (${estado.procesados} hasta el momento)`;
+  }
+  return null;
+}
+
+// Acciones que de verdad hacen algo en Blackboard (crear/eliminar anuncios
+// o sesiones) corren en un hilo aparte del lado del servidor, en vez de
+// bloquear la petición HTTP mientras Playwright hace su trabajo (podía
+// tardar varios minutos sin ninguna señal de progreso). Este helper arranca
+// esa tarea y sondea su estado cada segundo, mostrando una rueda de carga
+// con el avance real (ver formatearProgresoTarea), hasta que el servidor
+// la marca como terminada.
+function ejecutarTareaDeFondo(urlIniciar, urlEstado, cuerpo, elementoCargando, elementoTexto) {
+  return new Promise((resolve, reject) => {
+    fetch(urlIniciar, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cuerpo || {}),
+    })
+      .then(async (respuesta) => {
+        if (!respuesta.ok) {
+          const datos = await respuesta.json();
+          throw new Error(datos.error || "No se pudo iniciar la tarea.");
+        }
+        if (elementoCargando) {
+          elementoCargando.classList.remove("oculto");
+        }
+        const intervalo = setInterval(async () => {
+          const respuestaEstado = await fetch(urlEstado);
+          const estado = await respuestaEstado.json();
+
+          if (elementoTexto) {
+            const progreso = formatearProgresoTarea(estado);
+            if (progreso) {
+              elementoTexto.textContent = progreso;
+            }
+          }
+
+          if (estado.fase !== "terminado") {
+            return;
+          }
+          clearInterval(intervalo);
+          if (elementoCargando) {
+            elementoCargando.classList.add("oculto");
+          }
+          if (estado.error) {
+            reject(new Error(estado.error));
+          } else {
+            resolve(estado.resultado);
+          }
+        }, 1000);
+      })
+      .catch((error) => {
+        if (elementoCargando) {
+          elementoCargando.classList.add("oculto");
+        }
+        reject(error);
+      });
+  });
+}
 
 // Envuelve el diálogo de confirmación en una promesa, para poder usarlo con
 // await igual que se usaba confirm() antes.
@@ -1119,12 +1193,13 @@ async function generarEnBlackboard() {
   botonGenerarEnBlackboard.textContent = "Generando...";
 
   try {
-    const respuesta = await fetch("/api/anuncios-semanales/generar-en-blackboard", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id_curso: cursoInfo.id, anuncios }),
-    });
-    const resultado = await respuesta.json();
+    const resultado = await ejecutarTareaDeFondo(
+      "/api/anuncios-semanales/generar-en-blackboard",
+      "/api/anuncios-semanales/generar-en-blackboard/estado",
+      { id_curso: cursoInfo.id, anuncios },
+      cargandoGenerarAnuncios,
+      textoCargandoGenerarAnuncios
+    );
 
     if (resultado.estado === "error") {
       mostrarResultadoBlackboard(
@@ -1139,6 +1214,8 @@ async function generarEnBlackboard() {
       mensajeResultado += ` No se pudieron publicar: ${resultado.fallidos.join(", ")}.`;
     }
     mostrarResultadoBlackboard(resultado.fallidos && resultado.fallidos.length > 0 ? "Generado con avisos" : "Listo", mensajeResultado);
+  } catch (error) {
+    mostrarResultadoBlackboard("No se pudo generar", error.message);
   } finally {
     botonGenerarEnBlackboard.disabled = false;
     botonGenerarEnBlackboard.textContent = textoOriginal;
@@ -1465,6 +1542,8 @@ const dialogoVerSesiones = document.getElementById("dialogo-ver-sesiones");
 const cuerpoTablaSesiones = document.getElementById("cuerpo-tabla-sesiones");
 const botonGenerarSesionesEnBlackboard = document.getElementById("boton-generar-sesiones-en-blackboard");
 const botonEliminarSesionesNoIniciadas = document.getElementById("boton-eliminar-sesiones-no-iniciadas");
+const cargandoSesionesBlackboard = document.getElementById("cargando-sesiones-blackboard");
+const textoCargandoSesionesBlackboard = document.getElementById("texto-cargando-sesiones-blackboard");
 const botonAbrirFeriados = document.getElementById("boton-abrir-feriados");
 const botonAbrirFeriadosTool = document.getElementById("boton-abrir-feriados-tool");
 const botonCerrarVerSesiones = document.getElementById("boton-cerrar-ver-sesiones");
@@ -1911,14 +1990,16 @@ async function generarSesionesEnBlackboard() {
   botonGenerarSesionesEnBlackboard.disabled = true;
   const textoOriginal = botonGenerarSesionesEnBlackboard.textContent;
   botonGenerarSesionesEnBlackboard.textContent = "Generando...";
+  textoCargandoSesionesBlackboard.textContent = "Creando sesiones en Blackboard, esto puede tardar varios minutos...";
 
   try {
-    const respuesta = await fetch("/api/sesiones-dictado/generar-en-blackboard", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id_curso: cursoInfo.id, sesiones: sesionesAGenerar }),
-    });
-    const resultado = await respuesta.json();
+    const resultado = await ejecutarTareaDeFondo(
+      "/api/sesiones-dictado/generar-en-blackboard",
+      "/api/sesiones-dictado/generar-en-blackboard/estado",
+      { id_curso: cursoInfo.id, sesiones: sesionesAGenerar },
+      cargandoSesionesBlackboard,
+      textoCargandoSesionesBlackboard
+    );
 
     if (resultado.estado === "error") {
       mostrarResultadoBlackboard("No se pudo generar", resultado.error || "No se pudo generar las sesiones en Blackboard.");
@@ -1933,6 +2014,8 @@ async function generarSesionesEnBlackboard() {
       resultado.fallidos && resultado.fallidos.length > 0 ? "Generado con avisos" : "Listo",
       mensajeResultado
     );
+  } catch (error) {
+    mostrarResultadoBlackboard("No se pudo generar", error.message);
   } finally {
     botonGenerarSesionesEnBlackboard.disabled = false;
     botonGenerarSesionesEnBlackboard.textContent = textoOriginal;
@@ -2001,14 +2084,16 @@ async function eliminarSesionesNoIniciadas() {
   botonEliminarSesionesNoIniciadas.disabled = true;
   const textoOriginal = botonEliminarSesionesNoIniciadas.textContent;
   botonEliminarSesionesNoIniciadas.textContent = "Eliminando...";
+  textoCargandoSesionesBlackboard.textContent = "Eliminando sesiones en Blackboard, esto puede tardar varios minutos...";
 
   try {
-    const respuesta = await fetch("/api/sesiones-dictado/eliminar-en-blackboard", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id_curso: cursoInfo.id }),
-    });
-    const resultado = await respuesta.json();
+    const resultado = await ejecutarTareaDeFondo(
+      "/api/sesiones-dictado/eliminar-en-blackboard",
+      "/api/sesiones-dictado/eliminar-en-blackboard/estado",
+      { id_curso: cursoInfo.id },
+      cargandoSesionesBlackboard,
+      textoCargandoSesionesBlackboard
+    );
 
     if (resultado.estado === "error" && !resultado.eliminados) {
       mostrarResultadoBlackboard("No se pudo eliminar", resultado.error || "No se pudo eliminar las sesiones en Blackboard.");
@@ -2023,6 +2108,8 @@ async function eliminarSesionesNoIniciadas() {
       resultado.fallidos && resultado.fallidos.length > 0 ? "Eliminado con avisos" : "Listo",
       mensajeResultado
     );
+  } catch (error) {
+    mostrarResultadoBlackboard("No se pudo eliminar", error.message);
   } finally {
     botonEliminarSesionesNoIniciadas.disabled = false;
     botonEliminarSesionesNoIniciadas.textContent = textoOriginal;

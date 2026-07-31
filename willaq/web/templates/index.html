@@ -131,15 +131,6 @@
           </li>
           <li class="item-herramienta pendiente">
             <div class="icono-herramienta">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6l-5 4H4a1 1 0 0 0-1 1z"/><path d="M16 8a4 4 0 0 1 0 8"/><path d="M19 5a8 8 0 0 1 0 14"/></svg>
-            </div>
-            <div>
-              <p class="nombre-herramienta">Publicar anuncios</p>
-              <p class="estado-herramienta">Próximamente</p>
-            </div>
-          </li>
-          <li class="item-herramienta pendiente">
-            <div class="icono-herramienta">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
             </div>
             <div>
@@ -352,6 +343,11 @@
         <input type="file" id="campo-importar-anuncios" accept=".csv,text/csv" class="oculto">
         <button type="button" id="boton-cerrar-ver-anuncios" class="boton boton-secundario">Cerrar</button>
       </div>
+
+      <div id="cargando-generar-anuncios" class="cargando oculto">
+        <span class="spinner" aria-hidden="true"></span>
+        <span id="texto-cargando-generar-anuncios">Publicando en Blackboard, esto puede tardar varios minutos...</span>
+      </div>
     </div>
   </dialog>
 
@@ -445,6 +441,11 @@
         </button>
         <button type="button" id="boton-abrir-feriados" class="boton boton-secundario">Feriados</button>
         <button type="button" id="boton-cerrar-ver-sesiones" class="boton boton-secundario">Cerrar</button>
+      </div>
+
+      <div id="cargando-sesiones-blackboard" class="cargando oculto">
+        <span class="spinner" aria-hidden="true"></span>
+        <span id="texto-cargando-sesiones-blackboard">Trabajando en Blackboard, esto puede tardar varios minutos...</span>
       </div>
     </div>
   </dialog>

@@ -110,9 +110,11 @@ def generar_anuncios_en_blackboard(id_curso: str, anuncios: list, notificar=None
     fallidos = []
 
     with sync_playwright() as playwright:
+        # Sin ventana visible: esto no necesita ninguna acción manual del
+        # docente (a diferencia del login, que sí la necesita).
         contexto = playwright.chromium.launch_persistent_context(
             user_data_dir=str(DIR_PERFIL_NAVEGADOR),
-            headless=False,
+            headless=True,
         )
         pagina = contexto.pages[0] if contexto.pages else contexto.new_page()
         pagina.goto(URL_BLACKBOARD)

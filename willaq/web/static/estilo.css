@@ -873,11 +873,14 @@ html[data-tema="oscuro"] .logo-claro {
   max-width: min(1000px, 92vw);
 }
 
-/* Sin este límite, el texto largo de la descripción (sin saltos de línea
-   propios) sería lo más ancho del diálogo y anularía el ajuste anterior:
-   el navegador mediría el diálogo como si esa frase fuera una sola línea. */
+/* width (no max-width): en el cálculo de "fit-content" del diálogo, un
+   ancho en porcentaje no cuenta como el tamaño intrínseco del párrafo (se
+   trata como "auto"), así que sigue sin ser lo que manda el ancho de la
+   tabla (que sí lo dicta) pero, una vez que ese ancho ya quedó resuelto, el
+   párrafo se estira a ocupar todo ese espacio en vez de quedarse angosto y
+   pegado a la izquierda con hueco vacío al lado. */
 #dialogo-ver-sesiones .descripcion-dialogo {
-  max-width: 480px;
+  width: 100%;
 }
 
 /* --- Feriados --- */

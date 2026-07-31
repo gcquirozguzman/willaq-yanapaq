@@ -133,10 +133,12 @@ def obtener_cursos_activos(notificar=None, info_actualizacion=None) -> list:
     notificar("Buscando tus cursos activos en Blackboard...")
 
     with sync_playwright() as playwright:
-        # Mismo patrón que el login: perfil persistente, navegador visible.
+        # Mismo perfil persistente que el login, pero sin ventana visible:
+        # esto no necesita ninguna acción manual del docente (a diferencia
+        # del login, que sí la necesita para el usuario/clave/SMS).
         contexto = playwright.chromium.launch_persistent_context(
             user_data_dir=str(DIR_PERFIL_NAVEGADOR),
-            headless=False,
+            headless=True,
         )
 
         pagina = contexto.pages[0] if contexto.pages else contexto.new_page()

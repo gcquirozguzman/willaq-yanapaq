@@ -317,10 +317,13 @@ def _iniciar_sesion_blackboard(playwright, notificar):
 
     Devuelve (contexto, pagina), o (contexto, None) si no hay sesión activa
     (el contexto ya viene cerrado en ese caso, para no dejarlo colgado).
+
+    Sin ventana visible: esto no necesita ninguna acción manual del docente
+    (a diferencia del login, que sí la necesita).
     """
     contexto = playwright.chromium.launch_persistent_context(
         user_data_dir=str(DIR_PERFIL_NAVEGADOR),
-        headless=False,
+        headless=True,
     )
     pagina = contexto.pages[0] if contexto.pages else contexto.new_page()
     pagina.goto(URL_BLACKBOARD)
