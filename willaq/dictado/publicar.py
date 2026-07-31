@@ -122,12 +122,18 @@ def _formatear_fecha_collaborate(fecha_iso: str) -> str:
 
 
 def _esperar_frame_collab(pagina, debe_contener: str, timeout_segundos: int = 40):
-    """Espera a que aparezca un iframe de bbcollab.com cuya URL contenga 'debe_contener'."""
-    for _ in range(timeout_segundos):
+    """Espera a que aparezca un iframe de bbcollab.com cuya URL contenga 'debe_contener'.
+
+    Revisa cada 250ms (no cada segundo): normalmente el iframe aparece casi
+    de inmediato, así que sondear más seguido reduce la espera real sin
+    bajar el tope máximo de espera.
+    """
+    intentos = timeout_segundos * 4
+    for _ in range(intentos):
         for frame in pagina.frames:
             if "bbcollab.com" in frame.url and debe_contener in frame.url:
                 return frame
-        pagina.wait_for_timeout(1000)
+        pagina.wait_for_timeout(250)
     return None
 
 
@@ -139,15 +145,17 @@ def _abrir_lista_de_sesiones(pagina, id_curso: str, notificar):
     """
     pagina.goto(f"{URL_BLACKBOARD}ultra/courses/{id_curso}/outline")
     _esperar_carga_de_pagina(pagina)
-    pagina.wait_for_timeout(2000)
 
+    # Sin espera fija antes de estos clics: .click() de Playwright (no el
+    # click() de DOM que se usa más abajo, dentro del iframe) ya espera por
+    # su cuenta a que el botón esté visible/estable/habilitado, hasta su
+    # propio timeout. Una espera fija aparte solo sumaba tiempo muerto.
     try:
         pagina.locator(SELECTOR_BOTON_OPCIONES_COLLAB).click(timeout=15_000)
     except Exception as error:
         notificar(f"[ERROR] No se encontró el botón de opciones de Collaborate: {error}")
         return None
 
-    pagina.wait_for_timeout(1000)
     try:
         pagina.locator(SELECTOR_ITEM_ADMINISTRAR_SESIONES).click(timeout=10_000)
     except Exception as error:
@@ -159,11 +167,17 @@ def _abrir_lista_de_sesiones(pagina, id_curso: str, notificar):
         notificar("[ERROR] No cargó la lista de sesiones de Collaborate (iframe de bbcollab.com).")
         return None
 
-    # Deja que la lista termine de asentarse (animaciones, carga de datos):
-    # el botón "Crear sesión" existe antes de que esto termine, pero hacer
-    # clic demasiado pronto es justo lo que causa el problema de
-    # solapamiento visual descrito arriba.
-    pagina.wait_for_timeout(6_000)
+    # Antes había aquí una espera fija de 6s para dejar que la lista
+    # "asiente" antes de hacer clic en su primer botón real, pensada para
+    # el problema de solapamiento visual descrito arriba. ya no hace falta:
+    # ese problema solo afectaba a los clics por coordenadas, y todos los
+    # clics de este módulo usan click() de DOM (ver más abajo), que no le
+    # hace hit-testing a nada. Lo que sí sigue haciendo falta es esperar a
+    # que el botón en cuestión exista de verdad en el DOM, y eso lo hace
+    # cada función que sigue usando wait_for(state="visible") antes de su
+    # primer clic, en vez de una espera fija aquí que aplicaba a ciegas a
+    # los dos flujos (crear y eliminar) aunque solo uno la necesitara.
+    return frame_lista
     return frame_lista
 
 
@@ -175,7 +189,9 @@ def _crear_una_sesion(pagina, id_curso: str, sesion: dict, notificar) -> bool:
         return False
 
     try:
-        frame_lista.locator(SELECTOR_BOTON_CREAR_SESION).evaluate("el => el.click()")
+        boton_crear_sesion = frame_lista.locator(SELECTOR_BOTON_CREAR_SESION)
+        boton_crear_sesion.wait_for(state="visible", timeout=15_000)
+        boton_crear_sesion.evaluate("el => el.click()")
     except Exception as error:
         notificar(f"[ERROR] No se pudo hacer clic en 'Crear sesión' para '{sesion['titulo']}': {error}")
         return False
@@ -238,7 +254,17 @@ def _crear_una_sesion(pagina, id_curso: str, sesion: dict, notificar) -> bool:
     # otro elemento que visualmente tapa a este botón, en vez del botón
     # "Crear" en sí. Mismo problema y misma solución que con "Crear sesión".
     boton_crear.evaluate("el => el.click()")
-    pagina.wait_for_timeout(2_500)
+    # Espera a que el guardado se refleje de verdad (que el formulario
+    # "/session/new" haya desaparecido) antes de seguir, en vez de siempre
+    # asumir lo peor con una espera fija larga.
+    for _ in range(12):
+        sigue_en_formulario = any(
+            "bbcollab.com" in frame.url and "/session/new" in frame.url for frame in pagina.frames
+        )
+        if not sigue_en_formulario:
+            break
+        pagina.wait_for_timeout(250)
+    pagina.wait_for_timeout(800)
     return True
 
 
@@ -262,23 +288,32 @@ def _listar_titulos_no_iniciados(frame_lista) -> list:
     return titulos
 
 
-def _eliminar_una_sesion(pagina, id_curso: str, titulo: str, notificar) -> bool:
-    """Elimina, si existe, la sesión de Collaborate con ese nombre exacto."""
-    frame_lista = _abrir_lista_de_sesiones(pagina, id_curso, notificar)
-    if frame_lista is None:
-        notificar(f"[ERROR] No se pudo abrir la lista de sesiones de Collaborate para eliminar '{titulo}'.")
-        return False
+def _eliminar_una_sesion(pagina, frame_lista, titulo: str, notificar) -> bool:
+    """Elimina, si existe, la sesión de Collaborate con ese nombre exacto.
 
+    Recibe 'frame_lista' ya abierto (lo abre y lo relee quien llama, para
+    decidir qué queda pendiente) en vez de volver a abrirlo aquí: abrir la
+    lista es lo más lento de todo el flujo, así que hacerlo dos veces por
+    cada eliminación (una para ver qué falta, otra para eliminarla) le
+    duplicaba el tiempo a esta acción sin necesidad.
+    """
     try:
-        frame_lista.locator(SELECTOR_BOTON_BUSCAR_SESIONES).evaluate("el => el.click()")
-        pagina.wait_for_timeout(500)
+        boton_buscar = frame_lista.locator(SELECTOR_BOTON_BUSCAR_SESIONES)
+        boton_buscar.wait_for(state="visible", timeout=15_000)
+        boton_buscar.evaluate("el => el.click()")
         frame_lista.locator(SELECTOR_CAMPO_BUSQUEDA_SESIONES).fill(titulo)
-        pagina.wait_for_timeout(1_500)
     except Exception as error:
         notificar(f"[ERROR] No se pudo buscar '{titulo}': {error}")
         return False
 
+    # La lista filtra en vivo mientras se escribe; se sondea seguido en vez
+    # de una espera fija, para seguir en cuanto aparezca el resultado.
     fila_titulo = frame_lista.get_by_text(titulo, exact=True)
+    for _ in range(16):
+        if fila_titulo.count() > 0:
+            break
+        pagina.wait_for_timeout(250)
+
     if fila_titulo.count() == 0:
         notificar(f"[AVISO] No se encontró entre las sesiones no iniciadas la sesión '{titulo}' (puede que ya no exista, ya haya comenzado, o ya haya finalizado).")
         return False
@@ -297,14 +332,26 @@ def _eliminar_una_sesion(pagina, id_curso: str, titulo: str, notificar) -> bool:
             return False
         id_sesion = boton_fila.get_attribute("id").replace("session-", "")
 
-        frame_lista.locator(f"#session-{id_sesion}-options-dropdown-toggle").evaluate("el => el.click()")
-        pagina.wait_for_timeout(800)
+        boton_opciones = frame_lista.locator(f"#session-{id_sesion}-options-dropdown-toggle")
+        boton_opciones.wait_for(state="visible", timeout=10_000)
+        boton_opciones.evaluate("el => el.click()")
 
-        frame_lista.locator(SELECTOR_BOTON_ELIMINAR_SESION).evaluate("el => el.click()")
-        pagina.wait_for_timeout(1_000)
+        boton_eliminar = frame_lista.locator(SELECTOR_BOTON_ELIMINAR_SESION)
+        boton_eliminar.wait_for(state="visible", timeout=10_000)
+        boton_eliminar.evaluate("el => el.click()")
 
-        frame_lista.locator(SELECTOR_BOTON_CONFIRMAR_ELIMINAR).evaluate("el => el.click()")
-        pagina.wait_for_timeout(2_500)
+        boton_confirmar = frame_lista.locator(SELECTOR_BOTON_CONFIRMAR_ELIMINAR)
+        boton_confirmar.wait_for(state="visible", timeout=10_000)
+        boton_confirmar.evaluate("el => el.click()")
+
+        # Espera a que el borrado se refleje de verdad (que la fila haya
+        # desaparecido) antes de seguir, en vez de siempre asumir lo peor
+        # con una espera fija larga.
+        for _ in range(12):
+            if fila_titulo.count() == 0:
+                break
+            pagina.wait_for_timeout(250)
+        pagina.wait_for_timeout(500)
     except Exception as error:
         notificar(f"[ERROR] No se pudo eliminar '{titulo}': {error}")
         return False
@@ -432,7 +479,7 @@ def eliminar_sesiones_en_blackboard(id_curso: str, notificar=None) -> dict:
             ya_intentados.add(titulo)
             notificar(f"Eliminando sesión de Collaborate: {titulo}...")
             try:
-                if _eliminar_una_sesion(pagina, id_curso, titulo, notificar):
+                if _eliminar_una_sesion(pagina, frame_lista, titulo, notificar):
                     eliminados += 1
                     notificar(f"[OK] Eliminada: {titulo}")
                 else:
