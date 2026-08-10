@@ -21,41 +21,36 @@ from flask import Flask, jsonify, render_template, request, send_file
 
 from willaq.anuncios.plantilla import generar_plantilla
 from willaq.anuncios.publicar import generar_anuncios_en_blackboard
-from willaq.anuncios.semanal import (
-    guardar_configuracion_semanal,
-    obtener_configuracion_semanal,
-    reiniciar_configuraciones as reiniciar_anuncios_semanales,
-)
+from willaq.anuncios.semanal import guardar_configuracion_semanal, obtener_configuracion_semanal
 from willaq.autenticacion.login import (
     RUTA_AVATAR_DOCENTE,
     cargar_estado_sesion_guardado,
     ejecutar_login,
 )
-from willaq.cursos.fechas import (
-    guardar_fechas_curso,
-    obtener_todas_las_fechas,
-    reiniciar_configuraciones as reiniciar_fechas_cursos,
+from willaq.cursos.fechas import guardar_fechas_curso, obtener_todas_las_fechas
+from willaq.cursos.listar import (
+    cargar_cursos_guardados,
+    cargar_grupos_elegidos,
+    guardar_grupos_elegidos,
+    obtener_cursos_activos,
 )
-from willaq.cursos.listar import cargar_cursos_guardados, obtener_cursos_activos
 from willaq.dictado.feriados import guardar_feriados, obtener_feriados
 from willaq.dictado.publicar import eliminar_sesiones_en_blackboard, generar_sesiones_en_blackboard
-from willaq.dictado.reprogramaciones import (
-    guardar_reprogramacion,
-    obtener_reprogramaciones_curso,
-    reiniciar_configuraciones as reiniciar_reprogramaciones,
-)
+from willaq.dictado.reprogramaciones import guardar_reprogramacion, obtener_reprogramaciones_curso
 from willaq.dictado.sesiones import (
     guardar_configuracion_sesiones,
     obtener_configuracion_sesiones,
     obtener_todas_las_configuraciones as obtener_todas_las_sesiones,
-    reiniciar_configuraciones as reiniciar_sesiones_dictado,
 )
+from willaq.notas.consultar import obtener_elementos_calificables, obtener_notas_de_elemento
 from willaq.web.estado import (
     estado_cursos,
     estado_eliminar_sesiones,
+    estado_elementos_notas,
     estado_generar_anuncios,
     estado_generar_sesiones,
     estado_login,
+    estado_notas,
 )
 
 
@@ -249,6 +244,53 @@ def crear_app() -> Flask:
     def consultar_estado_cursos():
         return jsonify(estado_cursos.snapshot())
 
+    @app.get("/api/cursos/grupos")
+    def consultar_grupos_elegidos():
+        return jsonify({"grupos": cargar_grupos_elegidos()})
+
+    @app.post("/api/cursos/grupos")
+    def guardar_grupos_elegidos_web():
+        datos = request.get_json(silent=True) or {}
+        return jsonify(guardar_grupos_elegidos(datos.get("grupos")))
+
+    @app.post("/api/notas/elementos")
+    def iniciar_obtener_elementos_notas():
+        if estado_elementos_notas.en_progreso:
+            return jsonify({"error": "Ya se están buscando los exámenes del curso."}), 409
+
+        datos = request.get_json(silent=True) or {}
+        estado_elementos_notas.iniciar()
+        hilo = threading.Thread(
+            target=_obtener_elementos_notas_en_hilo,
+            args=(datos.get("id_curso"),),
+            daemon=True,
+        )
+        hilo.start()
+        return jsonify({"ok": True})
+
+    @app.get("/api/notas/elementos/estado")
+    def consultar_estado_elementos_notas():
+        return jsonify(estado_elementos_notas.snapshot())
+
+    @app.post("/api/notas/obtener")
+    def iniciar_obtener_notas():
+        if estado_notas.en_progreso:
+            return jsonify({"error": "Ya se están obteniendo notas."}), 409
+
+        datos = request.get_json(silent=True) or {}
+        estado_notas.iniciar()
+        hilo = threading.Thread(
+            target=_obtener_notas_en_hilo,
+            args=(datos.get("id_curso"), datos.get("elemento")),
+            daemon=True,
+        )
+        hilo.start()
+        return jsonify({"ok": True})
+
+    @app.get("/api/notas/obtener/estado")
+    def consultar_estado_notas():
+        return jsonify(estado_notas.snapshot())
+
     return app
 
 
@@ -301,18 +343,14 @@ def _obtener_cursos_en_hilo():
     info_actualizacion = {}
     try:
         cursos = obtener_cursos_activos(notificar=notificar, info_actualizacion=info_actualizacion)
-        if info_actualizacion.get("actualizado"):
-            # La lista de cursos es la base de "Generar Anuncios Semanales" y
-            # "Generar Sesiones Dictado" (que a su vez dependen de las fechas
-            # de cada curso): al renovarla de verdad (no cuando se mantuvo la
-            # lista guardada por un fallo), se reinicia también la
-            # configuración guardada de las tres, como se advierte en el
-            # modal de confirmación antes de obtener los cursos.
-            reiniciar_fechas_cursos()
-            reiniciar_anuncios_semanales()
-            reiniciar_sesiones_dictado()
-            reiniciar_reprogramaciones()
-            notificar("Se reinició la configuración de fechas de curso, Anuncios Semanales y Sesiones Dictado.")
+        # Antes, al renovar la lista de cursos se borraba la configuración
+        # guardada de fechas de curso, Anuncios Semanales, Sesiones Dictado
+        # y reprogramaciones. Ya no: volver a obtener los cursos es ahora
+        # también la forma de elegir con qué grupos (períodos) trabajar, así
+        # que hacerlo no puede costar perder todo lo configurado. La
+        # configuración se guarda por código de curso, de modo que la de un
+        # curso que ya no esté en la lista simplemente deja de usarse, sin
+        # estorbar ni pisar nada.
         guardado = cargar_cursos_guardados()
         obtenido_en = guardado.get("obtenido_en") if guardado else None
         estado_cursos.marcar_terminado("ok", cursos=cursos, obtenido_en=obtenido_en)
@@ -375,6 +413,40 @@ def _eliminar_sesiones_en_blackboard_en_hilo(id_curso):
     except Exception as error:
         estado_eliminar_sesiones.agregar_log(f"[ERROR] Ocurrió un problema inesperado: {error}")
         estado_eliminar_sesiones.marcar_terminado(error=str(error))
+
+
+def _obtener_elementos_notas_en_hilo(id_curso):
+    """Busca en un hilo aparte los exámenes/actividades calificables del curso."""
+
+    def notificar(mensaje):
+        estado_elementos_notas.agregar_log(mensaje)
+
+    try:
+        resultado = obtener_elementos_calificables(id_curso, notificar=notificar)
+        estado_elementos_notas.marcar_terminado(resultado=resultado)
+    except Exception as error:
+        estado_elementos_notas.agregar_log(f"[ERROR] Ocurrió un problema inesperado: {error}")
+        estado_elementos_notas.marcar_terminado(error=str(error))
+
+
+def _obtener_notas_en_hilo(id_curso, nombre_elemento):
+    """Lee en un hilo aparte las notas de todos los alumnos de un elemento."""
+
+    def notificar(mensaje):
+        estado_notas.agregar_log(mensaje)
+        # "Leyendo página N..." se emite una vez por cada página de la lista
+        # de alumnos (ver willaq/notas/consultar.py). No se sabe de antemano
+        # cuántas páginas hay, así que esto solo alimenta un contador ("N
+        # hasta el momento"), no un porcentaje.
+        if mensaje.startswith("Leyendo página"):
+            estado_notas.incrementar_procesados()
+
+    try:
+        resultado = obtener_notas_de_elemento(id_curso, nombre_elemento, notificar=notificar)
+        estado_notas.marcar_terminado(resultado=resultado)
+    except Exception as error:
+        estado_notas.agregar_log(f"[ERROR] Ocurrió un problema inesperado: {error}")
+        estado_notas.marcar_terminado(error=str(error))
 
 
 def _restaurar_sesion_guardada():

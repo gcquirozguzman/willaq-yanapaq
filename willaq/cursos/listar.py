@@ -35,6 +35,44 @@ URL_CURSOS = URL_BLACKBOARD + "ultra/course"
 # que se vuelve a obtener la lista (por ejemplo, si un curso cambia de estado).
 RUTA_CURSOS_GUARDADOS = DIR_DATOS / "cursos_activos.json"
 
+# Qué grupos (períodos) de la página de cursos eligió el docente para
+# trabajar. La lista completa de cursos se guarda siempre entera en
+# RUTA_CURSOS_GUARDADOS: esto solo dice cuáles de esos grupos mostrar, así
+# que cambiar la elección no pierde nada y se puede volver atrás sin tener
+# que consultar Blackboard de nuevo.
+RUTA_GRUPOS_ELEGIDOS = DIR_DATOS / "grupos_cursos.json"
+
+
+def guardar_grupos_elegidos(grupos: list) -> dict:
+    """Guarda en disco qué grupos de cursos eligió el docente."""
+    try:
+        DIR_DATOS.mkdir(parents=True, exist_ok=True)
+        elegidos = [str(grupo) for grupo in (grupos or [])]
+        RUTA_GRUPOS_ELEGIDOS.write_text(
+            json.dumps({"grupos": elegidos}, ensure_ascii=False), encoding="utf-8"
+        )
+        return {"ok": True, "grupos": elegidos}
+    except Exception as error:
+        return {"ok": False, "error": str(error)}
+
+
+def cargar_grupos_elegidos():
+    """Devuelve los grupos elegidos, o None si el docente nunca eligió.
+
+    None y [] significan cosas distintas: None es "todavía no eligió" (el
+    panel propone una selección inicial), y [] es "eligió no incluir
+    ninguno".
+    """
+    try:
+        if RUTA_GRUPOS_ELEGIDOS.exists():
+            datos = json.loads(RUTA_GRUPOS_ELEGIDOS.read_text(encoding="utf-8"))
+            grupos = datos.get("grupos")
+            if isinstance(grupos, list):
+                return grupos
+    except Exception:
+        pass
+    return None
+
 
 def _guardar_cursos_obtenidos(cursos: list):
     try:
@@ -73,9 +111,97 @@ SELECTOR_CODIGO_CURSO = ".course-id span"
 SELECTOR_NOMBRE_CURSO = "h4.js-course-title-element"
 SELECTOR_ESTADO_ABIERTO = 'span[bb-translate="base.courses.open"]'
 
+# La página de cursos no dibuja todas las tarjetas de golpe: las va
+# agregando de a pocas. Por eso el navegador se abre con una ventana
+# deliberadamente alta (para que entren todas) y se espera a que la
+# cantidad de tarjetas deje de crecer antes de leerlas (ver
+# _esperar_lista_de_cursos_completa).
+ANCHO_VENTANA = 1600
+ALTO_VENTANA = 2400
+
+MS_ENTRE_SONDEOS = 250
+SONDEOS_SIN_CAMBIO_PARA_TERMINAR = 8  # ~2 segundos sin tarjetas nuevas
+SONDEOS_MAXIMOS = 120  # tope de ~30 segundos
+
+# Blackboard agrupa las tarjetas por período ("202607P", "Cursos de 2025",
+# "Otros"...). El encabezado de cada grupo es un <h3> dentro de un
+# .course-card-term-name, y manda sobre todas las tarjetas que vienen
+# después de él en el orden del documento (confirmado con el HTML real).
+# El grupo "Otros" es donde Blackboard pone los cursos que no son de un
+# período de dictado (Biblioteca Virtual, capacitaciones internas, etc.).
+SELECTOR_ENCABEZADO_GRUPO = ".course-card-term-name h3"
+
+GRUPO_SIN_NOMBRE = "Sin grupo"
+
+# Se lee todo de un tirón dentro del navegador, en vez de con un locator
+# por campo y por tarjeta: así el docente espera bastante menos, y además
+# es la única forma sencilla de saber a qué grupo pertenece cada tarjeta
+# (hace falta recorrer encabezados y tarjetas en el orden del documento).
+JS_LEER_TARJETAS = """
+({ selectorEncabezado, selectorTarjeta, selectorCodigo, selectorNombre, selectorAbierto, sinNombre }) => {
+  const limpiar = (el) => (el ? el.textContent.replace(/\\s+/g, ' ').trim() : null);
+  const nodos = document.querySelectorAll(selectorEncabezado + ', ' + selectorTarjeta);
+  const cursos = [];
+  let grupo = sinNombre;
+  for (const nodo of nodos) {
+    if (nodo.matches(selectorEncabezado)) {
+      grupo = limpiar(nodo) || sinNombre;
+      continue;
+    }
+    cursos.push({
+      grupo,
+      codigo: limpiar(nodo.querySelector(selectorCodigo)),
+      nombre: limpiar(nodo.querySelector(selectorNombre)),
+      // El atributo "data-course-id" (ej. "_1460705_1") es el identificador
+      // interno que Blackboard usa en las URLs del curso (por ejemplo, para
+      // llegar directo a /ultra/courses/<id>/announcements). Confirmado
+      // navegando de verdad: el link de la tarjeta no cambia la URL visible
+      // (usa ruteo interno de Angular), pero este ID sí sirve para navegar
+      // directo con page.goto().
+      id: nodo.getAttribute('data-course-id'),
+      abierto: !!nodo.querySelector(selectorAbierto),
+    });
+  }
+  return cursos;
+}
+"""
+
+
+def _esperar_lista_de_cursos_completa(pagina):
+    """Espera a que dejen de aparecer tarjetas nuevas en la lista de cursos.
+
+    Antes se leía la lista apenas aparecía la PRIMERA tarjeta, y como el
+    resto todavía se estaba dibujando, se perdían cursos: se confirmó
+    contra la cuenta real del docente que así se devolvían 3 de los 7
+    cursos abiertos que tenía. Se sondea la cantidad de tarjetas y se
+    corta recién cuando se mantiene igual un rato, en vez de usar una
+    espera fija que sería lenta cuando hay pocos cursos y corta cuando hay
+    muchos.
+    """
+    tarjetas = pagina.locator(SELECTOR_TARJETA_CURSO)
+    conteo_anterior = tarjetas.count()
+    sondeos_sin_cambio = 0
+
+    for _ in range(SONDEOS_MAXIMOS):
+        pagina.wait_for_timeout(MS_ENTRE_SONDEOS)
+        conteo = tarjetas.count()
+        if conteo != conteo_anterior:
+            conteo_anterior = conteo
+            sondeos_sin_cambio = 0
+            continue
+        sondeos_sin_cambio += 1
+        if sondeos_sin_cambio >= SONDEOS_SIN_CAMBIO_PARA_TERMINAR:
+            break
+
+    return conteo_anterior
+
 
 def _extraer_cursos_activos(pagina, notificar):
     """Lee las tarjetas de curso de la página y devuelve solo los activos.
+
+    Cada curso devuelto incluye a qué grupo (período) pertenece, para que
+    el panel pueda preguntarle al docente qué grupos quiere usar sin tener
+    que volver a consultar Blackboard.
 
     Devuelve None (no una lista vacía) si la página de cursos no llegó a
     cargar a tiempo. Esta distinción importa: una lista vacía "de verdad"
@@ -83,32 +209,39 @@ def _extraer_cursos_activos(pagina, notificar):
     un fallo transitorio (timeout, red lenta) que NO debe sobrescribir la
     última lista buena guardada en disco.
     """
-    cursos = []
-
     try:
         pagina.locator(SELECTOR_TARJETA_CURSO).first.wait_for(timeout=15_000)
     except Exception as error:
         notificar(f"[AVISO] No se pudo cargar la lista de cursos: {error}")
         return None
 
-    tarjetas = pagina.locator(SELECTOR_TARJETA_CURSO)
-    for indice in range(tarjetas.count()):
-        tarjeta = tarjetas.nth(indice)
-        try:
-            if tarjeta.locator(SELECTOR_ESTADO_ABIERTO).count() == 0:
-                continue  # no dice "Abierto" (está finalizado, etc.): se descarta
-            codigo = tarjeta.locator(SELECTOR_CODIGO_CURSO).inner_text(timeout=2_000).strip()
-            nombre = tarjeta.locator(SELECTOR_NOMBRE_CURSO).inner_text(timeout=2_000).strip()
-            # El atributo "data-course-id" (ej. "_1460705_1") es el identificador
-            # interno que Blackboard usa en las URLs del curso (por ejemplo, para
-            # llegar directo a /ultra/courses/<id>/announcements). Confirmado
-            # navegando de verdad: el link de la tarjeta no cambia la URL visible
-            # (usa ruteo interno de Angular), pero este ID sí sirve para navegar
-            # directo con page.goto().
-            id_curso = tarjeta.get_attribute("data-course-id")
-            cursos.append({"codigo": codigo, "nombre": nombre, "id": id_curso})
-        except Exception:
-            continue  # si una tarjeta puntual falla al leerse, seguimos con las demás
+    _esperar_lista_de_cursos_completa(pagina)
+
+    tarjetas = pagina.evaluate(
+        JS_LEER_TARJETAS,
+        {
+            "selectorEncabezado": SELECTOR_ENCABEZADO_GRUPO,
+            "selectorTarjeta": SELECTOR_TARJETA_CURSO,
+            "selectorCodigo": SELECTOR_CODIGO_CURSO,
+            "selectorNombre": SELECTOR_NOMBRE_CURSO,
+            "selectorAbierto": SELECTOR_ESTADO_ABIERTO,
+            "sinNombre": GRUPO_SIN_NOMBRE,
+        },
+    )
+
+    cursos = []
+    for tarjeta in tarjetas:
+        # Sin "Abierto" (está finalizado, etc.): se descarta.
+        if not tarjeta.get("abierto") or not tarjeta.get("id"):
+            continue
+        cursos.append(
+            {
+                "codigo": tarjeta.get("codigo") or "",
+                "nombre": tarjeta.get("nombre") or "",
+                "id": tarjeta["id"],
+                "grupo": tarjeta.get("grupo") or GRUPO_SIN_NOMBRE,
+            }
+        )
 
     return cursos
 
@@ -142,6 +275,7 @@ def obtener_cursos_activos(notificar=None, info_actualizacion=None) -> list:
         )
 
         pagina = contexto.pages[0] if contexto.pages else contexto.new_page()
+        pagina.set_viewport_size({"width": ANCHO_VENTANA, "height": ALTO_VENTANA})
         pagina.goto(URL_BLACKBOARD)
         _esperar_carga_de_pagina(pagina)
 

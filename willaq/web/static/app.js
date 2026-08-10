@@ -56,6 +56,9 @@ const botonGenerarSesionesDictado = document.getElementById("boton-generar-sesio
 const itemCursos = document.getElementById("item-cursos");
 const estadoCursosEl = document.getElementById("estado-cursos");
 const botonObtenerCursos = document.getElementById("boton-obtener-cursos");
+const itemNotas = document.getElementById("item-notas");
+const estadoNotasEl = document.getElementById("estado-notas");
+const botonObtenerNotas = document.getElementById("boton-obtener-notas");
 
 let intervaloConsultaLogin = null;
 
@@ -240,6 +243,17 @@ function actualizarBloqueoHerramientas(sesionActiva) {
 
   actualizarBloqueoPlantilla();
   actualizarBloqueoSesionesDictado();
+  actualizarBloqueoNotas();
+}
+
+// "Obtener Notas" solo necesita saber qué cursos hay (para elegir uno); a
+// diferencia de las otras herramientas, no depende de las fechas del curso:
+// los exámenes y sus notas se leen tal como estén hoy en Blackboard.
+function actualizarBloqueoNotas() {
+  const hayCursos = cursosObtenidos.length > 0;
+  botonObtenerNotas.disabled = !hayCursos;
+  itemNotas.classList.toggle("bloqueada", !hayCursos);
+  estadoNotasEl.textContent = hayCursos ? "Disponible" : "Obtén tus cursos primero";
 }
 
 function actualizarBloqueoPlantilla() {
@@ -1289,6 +1303,7 @@ async function iniciarObtenerCursos() {
     return;
   }
 
+  veniaDeBuscarCursos = true;
   botonObtenerCursos.disabled = true;
   estadoCursosEl.textContent = "Buscando...";
   contadorCursos.textContent = "";
@@ -1338,28 +1353,93 @@ async function consultarEstadoCursos() {
     return;
   }
 
-  cursosObtenidos = estado.cursos;
+  todosLosCursos = estado.cursos;
+  fechaObtencionCursosActual = estado.obtenido_en;
   await cargarCursosFechas();
   await cargarCursosSesiones();
+  await cargarGruposElegidos();
+
+  // Tras una búsqueda nueva se pregunta con qué grupos trabajar (puede
+  // haber grupos que antes no existían); al restaurar la lista guardada al
+  // abrir el panel no se pregunta nada y se usa lo ya elegido.
+  if (veniaDeBuscarCursos) {
+    veniaDeBuscarCursos = false;
+    abrirDialogoGruposCursos();
+    return;
+  }
+
+  aplicarGruposYRenderizarCursos();
+}
+
+// Lista completa tal como vino de Blackboard (todos los grupos). De aquí
+// sale 'cursosObtenidos', que es la parte que el docente eligió usar.
+let todosLosCursos = [];
+let fechaObtencionCursosActual = null;
+// null = el docente todavía no eligió grupos.
+let gruposElegidos = null;
+// Se pone en true al lanzar una búsqueda nueva, para saber si hay que
+// volver a preguntar por los grupos cuando termine.
+let veniaDeBuscarCursos = false;
+
+async function cargarGruposElegidos() {
+  try {
+    const respuesta = await fetch("/api/cursos/grupos");
+    const datos = await respuesta.json();
+    gruposElegidos = datos.grupos;
+  } catch (error) {
+    gruposElegidos = null;
+  }
+}
+
+function gruposDisponibles() {
+  // Sin ordenar: se respeta el orden en que Blackboard muestra los grupos
+  // (el período más reciente primero, "Otros" al final).
+  const grupos = [];
+  for (const curso of todosLosCursos) {
+    if (!grupos.includes(curso.grupo)) {
+      grupos.push(curso.grupo);
+    }
+  }
+  return grupos;
+}
+
+function cursosDeLosGruposElegidos() {
+  if (gruposElegidos === null) {
+    return todosLosCursos;
+  }
+  return todosLosCursos.filter((curso) => gruposElegidos.includes(curso.grupo));
+}
+
+function aplicarGruposYRenderizarCursos() {
+  cursosObtenidos = cursosDeLosGruposElegidos();
   actualizarBloqueoPlantilla();
   actualizarBloqueoSesionesDictado();
+  actualizarBloqueoNotas();
 
-  estadoCursosEl.textContent = estado.cursos.length + " curso(s) encontrado(s)";
-  contadorCursos.textContent = estado.cursos.length + " curso(s)";
-  fechaObtencionCursos.textContent = formatearFechaObtencionCursos(estado.obtenido_en);
+  const total = todosLosCursos.length;
+  const mostrados = cursosObtenidos.length;
+  estadoCursosEl.textContent =
+    mostrados === total
+      ? mostrados + " curso(s) encontrado(s)"
+      : mostrados + " de " + total + " curso(s)";
+  contadorCursos.textContent = mostrados + " curso(s)";
+  fechaObtencionCursos.textContent = formatearFechaObtencionCursos(fechaObtencionCursosActual);
 
   listaCursos.innerHTML = "";
-  if (estado.cursos.length === 0) {
+  if (cursosObtenidos.length === 0) {
     const item = document.createElement("li");
     item.className = "mensaje-cursos";
-    item.textContent = "No se encontraron cursos activos.";
+    item.textContent =
+      total === 0
+        ? "No se encontraron cursos activos."
+        : 'Ningún curso en los grupos elegidos. Usa "Obtener" para elegir otros grupos.';
     listaCursos.appendChild(item);
     return;
   }
 
   elementosTarjetasCursos = {};
 
-  for (const curso of estado.cursos) {
+  for (const curso of cursosObtenidos) {
     const item = document.createElement("li");
 
     const codigo = document.createElement("span");
@@ -1397,6 +1477,90 @@ async function consultarEstadoCursos() {
 }
 
 botonObtenerCursos.addEventListener("click", iniciarObtenerCursos);
+
+// --- Elegir con qué grupos (períodos) de cursos trabajar ---
+// Blackboard agrupa los cursos por período y deja al final un grupo
+// "Otros" con lo que no es dictado (Biblioteca Virtual, capacitaciones
+// internas, etc.). Se pregunta una sola vez por búsqueda: la lista
+// completa ya vino en esa misma consulta, así que elegir grupos no vuelve
+// a abrir el navegador.
+
+const dialogoGruposCursos = document.getElementById("dialogo-grupos-cursos");
+const listaGruposCursos = document.getElementById("lista-grupos-cursos");
+const botonAceptarGruposCursos = document.getElementById("boton-aceptar-grupos-cursos");
+const botonCancelarGruposCursos = document.getElementById("boton-cancelar-grupos-cursos");
+
+const GRUPO_OTROS = "Otros";
+
+function gruposMarcadosPorDefecto(grupos) {
+  // La primera vez se proponen todos menos "Otros", que casi nunca son
+  // cursos que el docente dicte.
+  if (gruposElegidos !== null) {
+    return grupos.filter((grupo) => gruposElegidos.includes(grupo));
+  }
+  return grupos.filter((grupo) => grupo !== GRUPO_OTROS);
+}
+
+function abrirDialogoGruposCursos() {
+  const grupos = gruposDisponibles();
+  const marcados = gruposMarcadosPorDefecto(grupos);
+
+  listaGruposCursos.innerHTML = "";
+  for (const grupo of grupos) {
+    const cuantos = todosLosCursos.filter((curso) => curso.grupo === grupo).length;
+
+    const item = document.createElement("li");
+    const etiqueta = document.createElement("label");
+    etiqueta.className = "campo-casilla";
+
+    const casilla = document.createElement("input");
+    casilla.type = "checkbox";
+    casilla.value = grupo;
+    casilla.checked = marcados.includes(grupo);
+
+    const texto = document.createElement("span");
+    texto.innerHTML = `<strong></strong> <span class="conteo-grupo"></span>`;
+    texto.querySelector("strong").textContent = grupo;
+    texto.querySelector(".conteo-grupo").textContent = `${cuantos} curso(s)`;
+
+    etiqueta.append(casilla, texto);
+    item.appendChild(etiqueta);
+    listaGruposCursos.appendChild(item);
+  }
+
+  dialogoGruposCursos.showModal();
+}
+
+async function aceptarGruposCursos() {
+  const elegidos = Array.from(
+    listaGruposCursos.querySelectorAll("input[type=checkbox]")
+  )
+    .filter((casilla) => casilla.checked)
+    .map((casilla) => casilla.value);
+
+  gruposElegidos = elegidos;
+  botonAceptarGruposCursos.disabled = true;
+  try {
+    await fetch("/api/cursos/grupos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ grupos: elegidos }),
+    });
+  } finally {
+    botonAceptarGruposCursos.disabled = false;
+  }
+
+  dialogoGruposCursos.close();
+  aplicarGruposYRenderizarCursos();
+}
+
+botonAceptarGruposCursos.addEventListener("click", aceptarGruposCursos);
+botonCancelarGruposCursos.addEventListener("click", () => {
+  // Cancelar deja la elección anterior tal cual (o todos, si nunca eligió)
+  // en vez de dejar el panel sin cursos.
+  dialogoGruposCursos.close();
+  aplicarGruposYRenderizarCursos();
+});
 
 // --- Fechas de curso ---
 // Cada tarjeta de curso tiene un botón para configurar su fecha de inicio y
@@ -2313,3 +2477,176 @@ botonCerrarFeriados.addEventListener("click", () => {
   // feriados de inmediato, sin tener que volver a generarla.
   actualizarResaltadoFeriados();
 });
+
+// --- Obtener Notas ---
+// Dos consultas a Blackboard, cada una en su propia tarea de fondo (ver
+// ejecutarTareaDeFondo): primero los exámenes/actividades del curso, para
+// llenar el segundo combo, y después las notas de todos los alumnos del
+// elemento elegido. Ninguna de las dos escribe nada en Blackboard.
+
+const dialogoNotas = document.getElementById("dialogo-notas");
+const campoCursoNotas = document.getElementById("campo-curso-notas");
+const campoElementoNotas = document.getElementById("campo-elemento-notas");
+const mensajeNotas = document.getElementById("mensaje-notas");
+const cargandoNotas = document.getElementById("cargando-notas");
+const textoCargandoNotas = document.getElementById("texto-cargando-notas");
+const resumenNotas = document.getElementById("resumen-notas");
+const contenedorTablaNotas = document.getElementById("contenedor-tabla-notas");
+const cuerpoTablaNotas = document.getElementById("cuerpo-tabla-notas");
+const botonCargarNotas = document.getElementById("boton-cargar-notas");
+const botonCerrarNotas = document.getElementById("boton-cerrar-notas");
+
+function limpiarResultadoNotas() {
+  resumenNotas.classList.add("oculto");
+  resumenNotas.textContent = "";
+  contenedorTablaNotas.classList.add("oculto");
+  cuerpoTablaNotas.innerHTML = "";
+}
+
+function cursoNotasSeleccionado() {
+  return cursosObtenidos.find((curso) => curso.codigo === campoCursoNotas.value);
+}
+
+async function cargarElementosDelCurso() {
+  const curso = cursoNotasSeleccionado();
+  limpiarResultadoNotas();
+  campoElementoNotas.innerHTML = "";
+  campoElementoNotas.disabled = true;
+  botonCargarNotas.disabled = true;
+
+  if (!curso || !curso.id) {
+    mensajeNotas.textContent =
+      'No se pudo identificar el curso. Vuelve a hacer clic en "Obtener Cursos Activos" e intenta de nuevo.';
+    return;
+  }
+
+  mensajeNotas.textContent = "";
+  textoCargandoNotas.textContent = "Buscando los exámenes y actividades del curso...";
+
+  try {
+    const resultado = await ejecutarTareaDeFondo(
+      "/api/notas/elementos",
+      "/api/notas/elementos/estado",
+      { id_curso: curso.id },
+      cargandoNotas,
+      null
+    );
+
+    if (resultado.estado !== "ok") {
+      mensajeNotas.textContent = resultado.error || "No se pudieron obtener los exámenes del curso.";
+      return;
+    }
+
+    const elementos = resultado.elementos || [];
+    if (elementos.length === 0) {
+      mensajeNotas.textContent = "Este curso no tiene exámenes ni actividades con notas por alumno.";
+      return;
+    }
+
+    for (const elemento of elementos) {
+      const opcion = document.createElement("option");
+      opcion.value = elemento.nombre;
+      opcion.textContent = elemento.categoria
+        ? `${elemento.nombre} (${elemento.categoria})`
+        : elemento.nombre;
+      campoElementoNotas.appendChild(opcion);
+    }
+    campoElementoNotas.disabled = false;
+    botonCargarNotas.disabled = false;
+  } catch (error) {
+    mensajeNotas.textContent = error.message;
+  }
+}
+
+function celdaNota(alumno) {
+  // Blackboard muestra "--" en el campo de nota cuando todavía no hay
+  // ninguna puesta; se deja tal cual para no inventar un 0 que no existe.
+  const nota = alumno.nota && alumno.nota !== "--" ? alumno.nota : "—";
+  return alumno.sobre && nota !== "—" ? `${nota} / ${alumno.sobre}` : nota;
+}
+
+function renderizarTablaNotas(resultado) {
+  const alumnos = resultado.alumnos || [];
+  cuerpoTablaNotas.innerHTML = "";
+
+  alumnos.forEach((alumno, indice) => {
+    const fila = document.createElement("tr");
+    const valores = [
+      String(indice + 1),
+      alumno.alumno || "",
+      celdaNota(alumno),
+      alumno.actividad || alumno.estado_entrega || "",
+      alumno.nota_automatica || alumno.estado_nota || "",
+    ];
+    for (const valor of valores) {
+      const celda = document.createElement("td");
+      celda.textContent = valor;
+      fila.appendChild(celda);
+    }
+    cuerpoTablaNotas.appendChild(fila);
+  });
+
+  const conNota = alumnos.filter((alumno) => alumno.nota && alumno.nota !== "--").length;
+  resumenNotas.textContent =
+    `${resultado.elemento}: ${alumnos.length} alumno(s), ${conNota} con nota puesta` +
+    (resultado.sobre ? ` (sobre ${resultado.sobre}).` : ".");
+  resumenNotas.classList.remove("oculto");
+  contenedorTablaNotas.classList.remove("oculto");
+}
+
+async function cargarNotasDelElemento() {
+  const curso = cursoNotasSeleccionado();
+  if (!curso || !curso.id || !campoElementoNotas.value) {
+    return;
+  }
+
+  limpiarResultadoNotas();
+  mensajeNotas.textContent = "";
+  botonCargarNotas.disabled = true;
+  textoCargandoNotas.textContent = "Leyendo las notas de todos los alumnos...";
+
+  try {
+    const resultado = await ejecutarTareaDeFondo(
+      "/api/notas/obtener",
+      "/api/notas/obtener/estado",
+      { id_curso: curso.id, elemento: campoElementoNotas.value },
+      cargandoNotas,
+      textoCargandoNotas
+    );
+
+    if (resultado.estado !== "ok") {
+      mensajeNotas.textContent = resultado.error || "No se pudieron obtener las notas.";
+      return;
+    }
+    renderizarTablaNotas(resultado);
+  } catch (error) {
+    mensajeNotas.textContent = error.message;
+  } finally {
+    botonCargarNotas.disabled = false;
+  }
+}
+
+function abrirDialogoNotas() {
+  campoCursoNotas.innerHTML = "";
+  // Aquí sí se listan todos los cursos activos: no hace falta que tengan
+  // fechas configuradas (ver actualizarBloqueoNotas).
+  for (const curso of cursosObtenidos) {
+    const opcion = document.createElement("option");
+    opcion.value = curso.codigo;
+    opcion.textContent = curso.nombre;
+    campoCursoNotas.appendChild(opcion);
+  }
+
+  mensajeNotas.textContent = "";
+  limpiarResultadoNotas();
+  dialogoNotas.showModal();
+  // El segundo combo se llena solo, consultando Blackboard: así el docente
+  // no tiene que hacer un clic extra solo para ver qué exámenes hay.
+  cargarElementosDelCurso();
+}
+
+botonObtenerNotas.addEventListener("click", abrirDialogoNotas);
+campoCursoNotas.addEventListener("change", cargarElementosDelCurso);
+campoElementoNotas.addEventListener("change", limpiarResultadoNotas);
+botonCargarNotas.addEventListener("click", cargarNotasDelElemento);
+botonCerrarNotas.addEventListener("click", () => dialogoNotas.close());

@@ -2,7 +2,8 @@
 
 Herramienta para ahorrar tiempo en tareas repetitivas del Blackboard de
 Cibertec: anuncios semanales y sesiones de dictado en Collaborate,
-generados y publicados automáticamente.
+generados y publicados automáticamente, y las notas de tus alumnos
+consultadas de una sola vez.
 
 Cada profesor la usa en su propia computadora, con su propio login.
 **Nadie comparte contraseñas ni sesiones.**
@@ -10,7 +11,7 @@ Cada profesor la usa en su propia computadora, con su propio login.
 ## Requisitos
 
 - **Python 3.10 o superior**. Para verificarlo, abre una terminal y
-  escribe `python3 --version` (en Windows puede ser `python --version`).
+  escribe `python --version` (en Mac/Linux suele ser `python3 --version`).
   Si no lo tienes, descárgalo de https://www.python.org/downloads/ (en
   Windows, marca "Add Python to PATH" al instalar).
 - Conexión a internet.
@@ -19,25 +20,28 @@ Cada profesor la usa en su propia computadora, con su propio login.
 
 ## Instalación (una sola vez)
 
-Abre una terminal dentro de la carpeta del proyecto y ejecuta:
+Abre una terminal **dentro de la carpeta del proyecto** (la que contiene
+este archivo `README.md`) y ejecuta las cuatro líneas, una por una:
 
 **Windows:**
 
 ```
 python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-playwright install chromium
+.\.venv\Scripts\python -m pip install -r requirements.txt
+.\.venv\Scripts\python -m playwright install chromium
 ```
 
 **Mac / Linux:**
 
 ```
 python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-playwright install chromium
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m playwright install chromium
 ```
+
+La última línea descarga un navegador (~150 MB), así que puede demorar
+unos minutos. Al terminar, en la carpeta del proyecto debe existir una
+carpeta nueva llamada `.venv`.
 
 No hay que configurar nada más: la herramienta detecta tu nombre y foto
 automáticamente de Blackboard la primera vez que inicias sesión.
@@ -45,23 +49,62 @@ automáticamente de Blackboard la primera vez que inicias sesión.
 ## Uso diario
 
 1. Abre una terminal en la carpeta del proyecto.
-2. Activa el entorno virtual (el mismo comando de "Instalación": `.venv\Scripts\activate` en Windows, o `source .venv/bin/activate` en Mac/Linux).
-3. Ejecuta:
+2. Ejecuta:
+
+   **Windows:**
+
    ```
-   python -m willaq.cli panel
+   .\.venv\Scripts\python -m willaq.cli panel
    ```
-4. Se abre una pestaña en tu navegador con el panel. Ahí está todo:
+
+   **Mac / Linux:**
+
+   ```
+   .venv/bin/python -m willaq.cli panel
+   ```
+
+3. Se abre una pestaña en tu navegador con el panel. Ahí está todo:
    iniciar sesión, obtener tus cursos, generar anuncios semanales y
-   sesiones de dictado. Cada herramienta explica lo que hace antes de
+   sesiones de dictado, y obtener las notas de un examen o actividad para
+   todos tus alumnos. Cada herramienta explica lo que hace antes de
    pedirte confirmación.
-5. Para cerrar, vuelve a la terminal y presiona `Ctrl+C`.
+4. Para cerrar, vuelve a la terminal y presiona `Ctrl+C`.
 
 La primera vez que inicias sesión se abre una ventana de Blackboard aparte
 para que ingreses tu usuario, clave y código SMS a mano. Las siguientes
 veces normalmente no te lo vuelve a pedir.
 
+> **Nota:** el comando usa el Python de la carpeta `.venv` (y no solo
+> `python`) para que funcione siempre, sin tener que "activar" nada. En
+> Windows el `.\` del inicio es obligatorio: PowerShell no ejecuta rutas
+> relativas sin él. Si prefieres activar el entorno
+> (`.\.venv\Scripts\activate` en Windows, `source .venv/bin/activate` en
+> Mac/Linux), a partir de ahí puedes usar el comando corto
+> `python -m willaq.cli panel`.
+
 ## Problemas comunes
 
+- **`El módulo '.venv' no pudo cargarse`** o
+  **`CommandNotFoundException`** (en Windows): te faltó el `.\` al inicio.
+  El comando empieza con `.\.venv\Scripts\python`, con punto y barra
+  invertida, no con `.venv\...`.
+- **`ModuleNotFoundError: No module named 'playwright'`** (o `'flask'`, o
+  `'openpyxl'`): falta hacer la instalación, o la estás ejecutando con el
+  Python equivocado. Vuelve a la sección "Instalación" y ejecútala
+  completa; luego usa el comando de "Uso diario" tal cual está escrito,
+  empezando con `.\.venv\Scripts\python`.
+- **`python` no se reconoce como un comando**: Python no está instalado o
+  no se marcó "Add Python to PATH" al instalarlo. Reinstálalo desde
+  https://www.python.org/downloads/ marcando esa casilla, y luego cierra y
+  vuelve a abrir la terminal.
+- **El comando no encuentra `.venv\Scripts\python`**: estás en otra
+  carpeta, o la instalación no llegó a crear el entorno. Asegúrate de que
+  la terminal esté abierta en la carpeta del proyecto (donde está este
+  `README.md`) y repite la instalación.
+- **`No se puede cargar el archivo ...\Activate.ps1 porque la ejecución de
+  scripts está deshabilitada`**: solo aparece si intentas activar el
+  entorno en PowerShell. No hace falta activarlo: usa el comando de "Uso
+  diario" que empieza con `.\.venv\Scripts\python`.
 - **`playwright install chromium` falla con un error de certificado**:
   suele pasar en laptops de empresa con software de seguridad (Zscaler,
   Netskope y similares). Pide ayuda al soporte técnico de tu institución,

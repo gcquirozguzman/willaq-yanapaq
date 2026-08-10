@@ -940,3 +940,42 @@ html[data-tema="oscuro"] .logo-claro {
 .fila-campos.fila-campos-alineada-abajo {
   align-items: flex-end;
 }
+
+/* --- Grupos de cursos --- */
+
+.lista-grupos-cursos {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lista-grupos-cursos .conteo-grupo {
+  color: var(--texto-tenue);
+  font-size: 0.85rem;
+}
+
+/* --- Obtener Notas --- */
+
+/* La lista de notas es mucho más larga que las otras grillas del panel (un
+   curso puede tener 80 alumnos), así que aquí la tabla scrollea dentro de
+   su propia caja: si creciera hacia abajo como las demás, los botones del
+   diálogo quedarían fuera de la pantalla. */
+#contenedor-tabla-notas {
+  max-height: 55vh;
+  overflow-y: auto;
+}
+
+/* Con la tabla scrolleando por dentro, el encabezado se queda fijo arriba
+   para no perder de vista qué columna es cuál al bajar por la lista. */
+#contenedor-tabla-notas .tabla-anuncios th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+#dialogo-notas .campo {
+  flex: 1;
+}
