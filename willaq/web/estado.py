@@ -203,6 +203,72 @@ class EstadoTarea:
             }
 
 
+class EstadoLoginGestionDocente:
+    """Progreso del login en Gestión Docente, que corre en un hilo aparte.
+
+    Es más simple que EstadoLogin: este portal no tiene nombre ni foto de
+    perfil que mostrar, y su login no pide código SMS (solo usuario y
+    contraseña, que el docente escribe en un modal del panel). Lo que sí
+    tiene de más es 'sesion_activa', que aquí significa "las credenciales
+    guardadas sirven para entrar": este portal no conserva sesión, así que
+    lo que el panel comprueba al abrirse es eso (ver
+    willaq/autenticacion/gestion_docente.py).
+    """
+
+    def __init__(self):
+        self._candado = threading.Lock()
+        self.evento_login_manual = threading.Event()
+        self.evento_cierre = threading.Event()
+        # None = todavía no se comprobó en esta ejecución del panel.
+        self.sesion_activa = None
+        self._reiniciar_sin_candado()
+
+    def _reiniciar_sin_candado(self):
+        self.en_progreso = False
+        self.logs = []
+        # Fases: inactivo, verificando, ejecutando, esperando_login_manual,
+        # esperando_cierre, terminado.
+        self.fase = "inactivo"
+        self.resultado = None  # None | "ok" | "activa" | "aviso" | "error"
+        self.error = None
+
+    def iniciar(self, fase: str = "ejecutando"):
+        with self._candado:
+            self._reiniciar_sin_candado()
+            self.en_progreso = True
+            self.fase = fase
+        self.evento_login_manual.clear()
+        self.evento_cierre.clear()
+
+    def agregar_log(self, mensaje: str):
+        with self._candado:
+            self.logs.append(mensaje)
+
+    def marcar_fase(self, fase: str):
+        with self._candado:
+            self.fase = fase
+
+    def marcar_terminado(self, resultado: str, error: str = None, sesion_activa: bool = None):
+        with self._candado:
+            self.en_progreso = False
+            self.fase = "terminado"
+            self.resultado = resultado
+            self.error = error
+            if sesion_activa is not None:
+                self.sesion_activa = sesion_activa
+
+    def snapshot(self) -> dict:
+        with self._candado:
+            return {
+                "en_progreso": self.en_progreso,
+                "logs": list(self.logs),
+                "fase": self.fase,
+                "resultado": self.resultado,
+                "error": self.error,
+                "sesion_activa": self.sesion_activa,
+            }
+
+
 # Una sola instancia compartida por todo el panel web
 # (un solo docente, un solo proceso corriendo en su máquina).
 estado_login = EstadoLogin()
@@ -212,3 +278,8 @@ estado_generar_sesiones = EstadoTarea()
 estado_eliminar_sesiones = EstadoTarea()
 estado_elementos_notas = EstadoTarea()
 estado_notas = EstadoTarea()
+estado_login_gestion_docente = EstadoLoginGestionDocente()
+# Misma clase, otra instancia: "Procesar Notas Gestión Docente" también abre
+# una ventana y la mantiene hasta que el docente la cierra, así que necesita
+# el mismo tipo de estado (fases + evento de cierre).
+estado_procesar_notas_gd = EstadoLoginGestionDocente()

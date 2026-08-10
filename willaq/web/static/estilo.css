@@ -941,6 +941,60 @@ html[data-tema="oscuro"] .logo-claro {
   align-items: flex-end;
 }
 
+/* --- Estado de las dos sesiones (Blackboard y Gestión Docente) --- */
+
+.lista-sesiones {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.item-sesion {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+}
+
+/* El bloque de texto se queda con el espacio sobrante para que los botones
+   de todas las filas queden alineados a la derecha. */
+.item-sesion > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.nombre-sesion {
+  margin: 0;
+  font-weight: 600;
+}
+
+.estado-sesion {
+  margin: 2px 0 0;
+  color: var(--texto-tenue);
+  font-size: 0.8rem;
+}
+
+.punto-sesion {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background-color: var(--texto-tenue);
+}
+
+.punto-sesion.activa {
+  background-color: var(--exito);
+}
+
+.punto-sesion.inactiva {
+  background-color: var(--error);
+}
+
 /* --- Grupos de cursos --- */
 
 .lista-grupos-cursos {
@@ -963,8 +1017,16 @@ html[data-tema="oscuro"] .logo-claro {
    curso puede tener 80 alumnos), así que aquí la tabla scrollea dentro de
    su propia caja: si creciera hacia abajo como las demás, los botones del
    diálogo quedarían fuera de la pantalla. */
+/* Este diálogo puede crecer mucho (la lista de tipos más la tabla de
+   notas), así que scrollea por dentro: si creciera hacia abajo, el botón
+   "Cerrar" terminaría fuera de la pantalla. */
+#dialogo-notas .dialogo-contenido {
+  max-height: 88vh;
+  overflow-y: auto;
+}
+
 #contenedor-tabla-notas {
-  max-height: 55vh;
+  max-height: 45vh;
   overflow-y: auto;
 }
 
@@ -976,6 +1038,45 @@ html[data-tema="oscuro"] .logo-claro {
   z-index: 1;
 }
 
-#dialogo-notas .campo {
+/* El combo de curso no se estira a todo el ancho del diálogo: con nombres
+   de curso cortos quedaba una caja larguísima medio vacía. */
+.campo-curso-notas {
+  flex: 0 1 380px;
+  min-width: 0;
+}
+
+.lista-tipos-notas {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.item-tipo-nota {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+}
+
+/* El bloque de texto se queda con el espacio sobrante para que los dos
+   botones de todas las filas queden alineados a la derecha. */
+.item-tipo-nota > div:first-child {
   flex: 1;
+  min-width: 0;
+}
+
+.nombre-tipo-nota {
+  margin: 0;
+  font-weight: 600;
+}
+
+.detalle-tipo-nota {
+  margin: 2px 0 0;
+  color: var(--texto-tenue);
+  font-size: 0.8rem;
 }

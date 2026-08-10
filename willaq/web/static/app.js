@@ -157,6 +157,7 @@ async function consultarEstadoLogin() {
   actualizarCargando(estado);
   actualizarIdentidadDocente(estado, sesionActiva);
   actualizarBloqueoHerramientas(sesionActiva);
+  actualizarSesionBlackboardEnLista(sesionActiva);
 
   botonConfirmarLoginManual.classList.toggle("oculto", estado.fase !== "esperando_login_manual");
   botonConfirmarCierre.classList.toggle("oculto", estado.fase !== "esperando_cierre");
@@ -299,6 +300,280 @@ async function confirmarCierre() {
 botonIniciarLogin.addEventListener("click", iniciarLogin);
 botonConfirmarLoginManual.addEventListener("click", confirmarLoginManual);
 botonConfirmarCierre.addEventListener("click", confirmarCierre);
+
+// --- Sesión de Gestión Docente ---
+// Es un portal aparte de Blackboard y no conserva sesión: sus cookies son
+// de sesión y su estado vive en el servidor, así que no hay nada que
+// guardar entre usos (ver willaq/autenticacion/gestion_docente.py). Lo que
+// se guarda es el usuario y la contraseña —cifrados por Windows, en esta
+// computadora— y la herramienta vuelve a entrar sola cuando los necesita.
+// Por eso "Iniciar sesión" abre un modal en vez de una ventana de
+// navegador, y lo que se comprueba al abrir el panel es que esas
+// credenciales sigan sirviendo.
+
+const puntoSesionBlackboard = document.getElementById("punto-sesion-blackboard");
+const estadoSesionBlackboard = document.getElementById("estado-sesion-blackboard");
+const puntoSesionGestion = document.getElementById("punto-sesion-gestion");
+const estadoSesionGestion = document.getElementById("estado-sesion-gestion");
+const botonLoginGestion = document.getElementById("boton-login-gestion");
+const registroGestion = document.getElementById("registro-gestion");
+
+const dialogoLoginGestion = document.getElementById("dialogo-login-gestion");
+const campoUsuarioGestion = document.getElementById("campo-usuario-gestion");
+const campoClaveGestion = document.getElementById("campo-clave-gestion");
+const mensajeLoginGestion = document.getElementById("mensaje-login-gestion");
+const botonGuardarLoginGestion = document.getElementById("boton-guardar-login-gestion");
+const botonOlvidarLoginGestion = document.getElementById("boton-olvidar-login-gestion");
+const botonCancelarLoginGestion = document.getElementById("boton-cancelar-login-gestion");
+
+let intervaloConsultaGestion = null;
+let sesionGestionActiva = false;
+
+function pintarPuntoSesion(punto, activa) {
+  punto.classList.toggle("activa", activa === true);
+  punto.classList.toggle("inactiva", activa === false);
+}
+
+function actualizarSesionBlackboardEnLista(sesionActiva) {
+  estadoSesionBlackboard.textContent = sesionActiva ? "Sesión activa" : "Sin sesión";
+  pintarPuntoSesion(puntoSesionBlackboard, sesionActiva);
+}
+
+const TEXTOS_GESTION = {
+  activa: "Acceso verificado",
+  sin_credenciales: "Falta tu usuario y contraseña",
+  credenciales: "Usuario o contraseña incorrectos",
+  error: "No se pudo comprobar",
+};
+
+function actualizarSesionGestion(estado) {
+  registroGestion.textContent = (estado.logs || []).join("\n");
+
+  if (estado.fase === "verificando") {
+    estadoSesionGestion.textContent = "Comprobando...";
+    botonLoginGestion.disabled = true;
+    return;
+  }
+  if (estado.fase === "ejecutando") {
+    estadoSesionGestion.textContent = "Entrando a Gestión Docente...";
+    botonLoginGestion.disabled = true;
+    mensajeLoginGestion.textContent = "Comprobando tus datos contra el portal...";
+    return;
+  }
+
+  botonLoginGestion.disabled = false;
+  sesionGestionActiva = estado.sesion_activa === true;
+  pintarPuntoSesion(puntoSesionGestion, estado.sesion_activa);
+  estadoSesionGestion.textContent =
+    TEXTOS_GESTION[estado.resultado] || (estado.sesion_activa ? "Acceso verificado" : "Sin verificar");
+  botonLoginGestion.textContent = sesionGestionActiva ? "Cambiar datos" : "Iniciar sesión";
+  // "Procesar Notas Gestión Docente" usa estas credenciales, así que su fila
+  // se actualiza junto con esta.
+  actualizarBloqueoProcesarNotasGd();
+}
+
+async function consultarEstadoGestion() {
+  const respuesta = await fetch("/api/gestion-docente/estado");
+  const estado = await respuesta.json();
+  actualizarSesionGestion(estado);
+
+  if (!estado.en_progreso && estado.fase === "terminado") {
+    clearInterval(intervaloConsultaGestion);
+    intervaloConsultaGestion = null;
+    terminarIntentoDeLoginGestion(estado);
+  }
+}
+
+function seguirEstadoGestion() {
+  clearInterval(intervaloConsultaGestion);
+  intervaloConsultaGestion = setInterval(consultarEstadoGestion, 1000);
+}
+
+async function verificarSesionGestion() {
+  const respuesta = await fetch("/api/gestion-docente/verificar", { method: "POST" });
+  if (!respuesta.ok) {
+    return;  // ya hay algo corriendo; su propio sondeo actualizará la fila
+  }
+  seguirEstadoGestion();
+}
+
+// --- Modal de usuario y contraseña de Gestión Docente ---
+
+// Solo se marca mientras hay un intento lanzado desde el modal, para no
+// cerrarlo por el resultado de la comprobación automática del arranque.
+let intentandoLoginGestion = false;
+
+async function abrirDialogoLoginGestion() {
+  mensajeLoginGestion.textContent = "";
+  campoClaveGestion.value = "";
+  botonGuardarLoginGestion.disabled = false;
+
+  const respuesta = await fetch("/api/gestion-docente/credenciales");
+  const datos = await respuesta.json();
+  campoUsuarioGestion.value = datos.usuario || "";
+  botonOlvidarLoginGestion.classList.toggle("oculto", !datos.hay_credenciales);
+
+  dialogoLoginGestion.showModal();
+  (campoUsuarioGestion.value ? campoClaveGestion : campoUsuarioGestion).focus();
+}
+
+async function enviarLoginGestion() {
+  const usuario = campoUsuarioGestion.value.trim();
+  const clave = campoClaveGestion.value;
+  if (!usuario || !clave) {
+    mensajeLoginGestion.textContent = "Escribe tu usuario y tu contraseña.";
+    return;
+  }
+
+  botonGuardarLoginGestion.disabled = true;
+  mensajeLoginGestion.textContent = "Comprobando tus datos contra el portal...";
+
+  const respuesta = await fetch("/api/gestion-docente/login/iniciar", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ usuario, clave }),
+  });
+  if (!respuesta.ok) {
+    const error = await respuesta.json();
+    mensajeLoginGestion.textContent = error.error || "No se pudo iniciar el intento.";
+    botonGuardarLoginGestion.disabled = false;
+    return;
+  }
+
+  intentandoLoginGestion = true;
+  seguirEstadoGestion();
+}
+
+// Reacciona al resultado del intento hecho desde el modal: si entró, se
+// cierra; si no, se queda abierto con el motivo para poder corregir.
+function terminarIntentoDeLoginGestion(estado) {
+  if (!intentandoLoginGestion) {
+    return;
+  }
+  intentandoLoginGestion = false;
+  botonGuardarLoginGestion.disabled = false;
+
+  if (estado.resultado === "activa") {
+    campoClaveGestion.value = "";
+    mensajeLoginGestion.textContent = "";
+    dialogoLoginGestion.close();
+    return;
+  }
+  if (estado.resultado === "credenciales") {
+    mensajeLoginGestion.textContent =
+      "El portal no aceptó ese usuario o esa contraseña. Revísalos e inténtalo de nuevo.";
+    return;
+  }
+  mensajeLoginGestion.textContent =
+    estado.error || "No se pudo comprobar el acceso a Gestión Docente.";
+}
+
+botonLoginGestion.addEventListener("click", abrirDialogoLoginGestion);
+botonGuardarLoginGestion.addEventListener("click", enviarLoginGestion);
+botonCancelarLoginGestion.addEventListener("click", () => {
+  campoClaveGestion.value = "";
+  dialogoLoginGestion.close();
+});
+botonOlvidarLoginGestion.addEventListener("click", async () => {
+  await fetch("/api/gestion-docente/login/olvidar", { method: "POST" });
+  campoUsuarioGestion.value = "";
+  campoClaveGestion.value = "";
+  botonOlvidarLoginGestion.classList.add("oculto");
+  mensajeLoginGestion.textContent = "Se borraron las credenciales guardadas.";
+  consultarEstadoGestion();
+});
+// Enter en cualquiera de los dos campos equivale a pulsar el botón.
+[campoUsuarioGestion, campoClaveGestion].forEach((campo) => {
+  campo.addEventListener("keydown", (evento) => {
+    if (evento.key === "Enter") {
+      evento.preventDefault();
+      enviarLoginGestion();
+    }
+  });
+});
+
+// --- Procesar Notas Gestión Docente ---
+// Por ahora esta herramienta abre la pantalla de registro de notas del
+// portal y mantiene la ventana abierta para que el docente trabaje ahí. Lo
+// primero que hace es iniciar sesión con las credenciales guardadas, en esa
+// misma ventana, así que nunca depende de una sesión anterior. La ventana
+// se cierra cuando él la cierra (o con el botón "Cerrar" del panel).
+
+const itemProcesarNotasGd = document.getElementById("item-procesar-notas-gd");
+const estadoProcesarNotasGd = document.getElementById("estado-procesar-notas-gd");
+const botonProcesarNotasGd = document.getElementById("boton-procesar-notas-gd");
+const botonCerrarProcesarNotasGd = document.getElementById("boton-cerrar-procesar-notas-gd");
+
+let intervaloProcesarNotasGd = null;
+
+// Se bloquea solo si todavía no hay usuario y contraseña guardados, porque
+// sin ellos la herramienta no puede entrar al portal por su cuenta.
+function actualizarBloqueoProcesarNotasGd() {
+  const abierta = intervaloProcesarNotasGd !== null;
+  botonProcesarNotasGd.disabled = abierta || !sesionGestionActiva;
+  itemProcesarNotasGd.classList.toggle("bloqueada", !sesionGestionActiva);
+  if (!abierta) {
+    estadoProcesarNotasGd.textContent = sesionGestionActiva
+      ? "Disponible"
+      : "Inicia sesión en Gestión Docente primero";
+  }
+}
+
+async function consultarEstadoProcesarNotasGd() {
+  const respuesta = await fetch("/api/gestion-docente/procesar-notas/estado");
+  const estado = await respuesta.json();
+
+  if (estado.fase === "esperando_cierre") {
+    estadoProcesarNotasGd.textContent = "Ventana abierta";
+    botonCerrarProcesarNotasGd.classList.remove("oculto");
+    return;
+  }
+  if (estado.fase !== "terminado") {
+    estadoProcesarNotasGd.textContent = "Entrando al portal...";
+    return;
+  }
+
+  clearInterval(intervaloProcesarNotasGd);
+  intervaloProcesarNotasGd = null;
+  botonCerrarProcesarNotasGd.classList.add("oculto");
+
+  if (estado.resultado === "sin_credenciales" || estado.resultado === "credenciales") {
+    // El portal rechazó las credenciales guardadas (o ya no había): se
+    // refleja arriba para que el docente vuelva a escribirlas.
+    sesionGestionActiva = false;
+    pintarPuntoSesion(puntoSesionGestion, false);
+    estadoSesionGestion.textContent = TEXTOS_GESTION[estado.resultado];
+    botonLoginGestion.textContent = "Iniciar sesión";
+  } else if (estado.resultado === "error") {
+    estadoProcesarNotasGd.textContent = "No se pudo abrir";
+  }
+  actualizarBloqueoProcesarNotasGd();
+}
+
+async function abrirProcesarNotasGd() {
+  botonProcesarNotasGd.disabled = true;
+  estadoProcesarNotasGd.textContent = "Entrando al portal...";
+  const respuesta = await fetch("/api/gestion-docente/procesar-notas/abrir", { method: "POST" });
+  if (!respuesta.ok) {
+    actualizarBloqueoProcesarNotasGd();
+    return;
+  }
+  clearInterval(intervaloProcesarNotasGd);
+  intervaloProcesarNotasGd = setInterval(consultarEstadoProcesarNotasGd, 1000);
+}
+
+botonProcesarNotasGd.addEventListener("click", abrirProcesarNotasGd);
+botonCerrarProcesarNotasGd.addEventListener("click", async () => {
+  botonCerrarProcesarNotasGd.disabled = true;
+  await fetch("/api/gestion-docente/procesar-notas/cerrar", { method: "POST" });
+  botonCerrarProcesarNotasGd.disabled = false;
+});
+
+// Se comprueba al abrir el panel, como pidió el docente: así se sabe de
+// entrada si las credenciales guardadas siguen sirviendo, en vez de
+// enterarse recién al usar una herramienta.
+actualizarBloqueoProcesarNotasGd();
+verificarSesionGestion();
 
 // --- Generar Anuncios Semanales ---
 // Por ahora, este asistente solo junta los datos y los guarda (ver
@@ -2479,22 +2754,49 @@ botonCerrarFeriados.addEventListener("click", () => {
 });
 
 // --- Obtener Notas ---
-// Dos consultas a Blackboard, cada una en su propia tarea de fondo (ver
-// ejecutarTareaDeFondo): primero los exámenes/actividades del curso, para
-// llenar el segundo combo, y después las notas de todos los alumnos del
-// elemento elegido. Ninguna de las dos escribe nada en Blackboard.
+// Todo lo que se descarga (los tipos de nota de un curso, y las notas de
+// todos los alumnos de cada tipo) queda guardado en disco del lado del
+// servidor. Por eso abrir este diálogo no consulta Blackboard: muestra lo
+// último guardado, al instante. Blackboard se consulta solo cuando el
+// docente pulsa un botón, y siempre para una cosa concreta: "Buscar tipos
+// de nota" para la lista de tipos, y el "Obtener" de una fila para las
+// notas de ese tipo. Volver a pulsarlos es la forma de actualizar.
+// Ninguna de las dos consultas escribe nada en Blackboard.
 
 const dialogoNotas = document.getElementById("dialogo-notas");
 const campoCursoNotas = document.getElementById("campo-curso-notas");
-const campoElementoNotas = document.getElementById("campo-elemento-notas");
+const listaTiposNotas = document.getElementById("lista-tipos-notas");
+const fechaTiposNotas = document.getElementById("fecha-tipos-notas");
 const mensajeNotas = document.getElementById("mensaje-notas");
 const cargandoNotas = document.getElementById("cargando-notas");
 const textoCargandoNotas = document.getElementById("texto-cargando-notas");
 const resumenNotas = document.getElementById("resumen-notas");
 const contenedorTablaNotas = document.getElementById("contenedor-tabla-notas");
 const cuerpoTablaNotas = document.getElementById("cuerpo-tabla-notas");
-const botonCargarNotas = document.getElementById("boton-cargar-notas");
+const botonBuscarTiposNotas = document.getElementById("boton-buscar-tipos-notas");
 const botonCerrarNotas = document.getElementById("boton-cerrar-notas");
+
+// Lo guardado del curso que está a la vista: sus tipos de nota, y las
+// notas ya descargadas de cada tipo ({nombre: {alumnos, sobre, obtenido_en}}).
+let tiposNotaActuales = [];
+let fechaTiposNotaActual = null;
+let notasGuardadasActuales = {};
+
+function fechaLegibleNotas(iso) {
+  if (!iso) {
+    return "";
+  }
+  const fecha = new Date(iso);
+  if (Number.isNaN(fecha.getTime())) {
+    return "";
+  }
+  const dia = String(fecha.getDate()).padStart(2, "0");
+  const mes = String(fecha.getMonth() + 1).padStart(2, "0");
+  const anio = fecha.getFullYear();
+  const horas = String(fecha.getHours()).padStart(2, "0");
+  const minutos = String(fecha.getMinutes()).padStart(2, "0");
+  return `${dia}/${mes}/${anio} a las ${horas}:${minutos}`;
+}
 
 function limpiarResultadoNotas() {
   resumenNotas.classList.add("oculto");
@@ -2507,12 +2809,114 @@ function cursoNotasSeleccionado() {
   return cursosObtenidos.find((curso) => curso.codigo === campoCursoNotas.value);
 }
 
-async function cargarElementosDelCurso() {
+function celdaNota(alumno) {
+  // Blackboard muestra "--" en el campo de nota cuando todavía no hay
+  // ninguna puesta; se deja tal cual para no inventar un 0 que no existe.
+  const nota = alumno.nota && alumno.nota !== "--" ? alumno.nota : "—";
+  return alumno.sobre && nota !== "—" ? `${nota} / ${alumno.sobre}` : nota;
+}
+
+// --- La lista de tipos de nota, con un botón "Obtener" y otro "Ver" ---
+
+function crearFilaTipoNota(elemento) {
+  const guardado = notasGuardadasActuales[elemento.nombre];
+
+  const item = document.createElement("li");
+  item.className = "item-tipo-nota";
+
+  const datos = document.createElement("div");
+  const nombre = document.createElement("p");
+  nombre.className = "nombre-tipo-nota";
+  nombre.textContent = elemento.categoria
+    ? `${elemento.nombre} (${elemento.categoria})`
+    : elemento.nombre;
+
+  const detalle = document.createElement("p");
+  detalle.className = "detalle-tipo-nota";
+  detalle.textContent = guardado
+    ? `${(guardado.alumnos || []).length} alumno(s), descargadas el ${fechaLegibleNotas(guardado.obtenido_en)}`
+    : "Todavía no se descargan sus notas";
+  datos.append(nombre, detalle);
+
+  const botonObtener = document.createElement("button");
+  botonObtener.type = "button";
+  botonObtener.className = "boton-pequeno";
+  botonObtener.textContent = guardado ? "Actualizar" : "Obtener";
+
+  const botonVer = document.createElement("button");
+  botonVer.type = "button";
+  botonVer.className = "boton-pequeno";
+  botonVer.textContent = "Ver";
+  // "Ver" solo tiene sentido si ya hay notas descargadas de ese tipo.
+  botonVer.disabled = !guardado;
+
+  botonObtener.addEventListener("click", () => obtenerNotasDeTipo(elemento.nombre));
+  botonVer.addEventListener("click", () => verNotasDeTipo(elemento.nombre));
+
+  item.append(datos, botonObtener, botonVer);
+  return item;
+}
+
+function renderizarTiposNota() {
+  fechaTiposNotas.textContent = fechaTiposNotaActual
+    ? `Tipos de nota obtenidos el ${fechaLegibleNotas(fechaTiposNotaActual)}`
+    : "";
+
+  listaTiposNotas.innerHTML = "";
+  if (tiposNotaActuales.length === 0) {
+    const item = document.createElement("li");
+    item.className = "mensaje-cursos";
+    item.textContent = 'Todavía no hay tipos de nota. Pulsa "Buscar tipos de nota".';
+    listaTiposNotas.appendChild(item);
+    return;
+  }
+
+  for (const elemento of tiposNotaActuales) {
+    listaTiposNotas.appendChild(crearFilaTipoNota(elemento));
+  }
+}
+
+function bloquearBotonesTiposNota(bloqueado) {
+  botonBuscarTiposNotas.disabled = bloqueado;
+  for (const boton of listaTiposNotas.querySelectorAll("button")) {
+    boton.disabled = bloqueado;
+  }
+  if (!bloqueado) {
+    // Al desbloquear se vuelve a dibujar la lista, para que cada "Ver"
+    // recupere su estado real (habilitado solo si hay notas guardadas).
+    renderizarTiposNota();
+  }
+}
+
+// --- Lo guardado, que es lo que se muestra al abrir el diálogo ---
+
+async function cargarNotasGuardadasDelCurso() {
+  const curso = cursoNotasSeleccionado();
+  tiposNotaActuales = [];
+  fechaTiposNotaActual = null;
+  notasGuardadasActuales = {};
+  limpiarResultadoNotas();
+
+  if (curso) {
+    try {
+      const respuesta = await fetch(`/api/notas/guardadas/${encodeURIComponent(curso.codigo)}`);
+      const datos = await respuesta.json();
+      tiposNotaActuales = datos.elementos || [];
+      fechaTiposNotaActual = datos.obtenido_en;
+      notasGuardadasActuales = datos.notas || {};
+    } catch (error) {
+      mensajeNotas.textContent = "No se pudo leer lo guardado de este curso.";
+    }
+  }
+
+  renderizarTiposNota();
+}
+
+// --- Consultas reales a Blackboard ---
+
+async function buscarTiposNotaEnBlackboard() {
   const curso = cursoNotasSeleccionado();
   limpiarResultadoNotas();
-  campoElementoNotas.innerHTML = "";
-  campoElementoNotas.disabled = true;
-  botonCargarNotas.disabled = true;
 
   if (!curso || !curso.id) {
     mensajeNotas.textContent =
@@ -2522,12 +2926,13 @@ async function cargarElementosDelCurso() {
 
   mensajeNotas.textContent = "";
   textoCargandoNotas.textContent = "Buscando los exámenes y actividades del curso...";
+  bloquearBotonesTiposNota(true);
 
   try {
     const resultado = await ejecutarTareaDeFondo(
       "/api/notas/elementos",
       "/api/notas/elementos/estado",
-      { id_curso: curso.id },
+      { id_curso: curso.id, codigo_curso: curso.codigo },
       cargandoNotas,
       null
     );
@@ -2536,37 +2941,61 @@ async function cargarElementosDelCurso() {
       mensajeNotas.textContent = resultado.error || "No se pudieron obtener los exámenes del curso.";
       return;
     }
-
-    const elementos = resultado.elementos || [];
-    if (elementos.length === 0) {
+    if ((resultado.elementos || []).length === 0) {
       mensajeNotas.textContent = "Este curso no tiene exámenes ni actividades con notas por alumno.";
-      return;
     }
-
-    for (const elemento of elementos) {
-      const opcion = document.createElement("option");
-      opcion.value = elemento.nombre;
-      opcion.textContent = elemento.categoria
-        ? `${elemento.nombre} (${elemento.categoria})`
-        : elemento.nombre;
-      campoElementoNotas.appendChild(opcion);
-    }
-    campoElementoNotas.disabled = false;
-    botonCargarNotas.disabled = false;
+    // Se relee lo guardado en vez de usar solo la respuesta: así la lista
+    // queda con la fecha real de guardado y con las notas que ya hubiera
+    // descargadas de cada tipo.
+    await cargarNotasGuardadasDelCurso();
   } catch (error) {
     mensajeNotas.textContent = error.message;
+  } finally {
+    bloquearBotonesTiposNota(false);
   }
 }
 
-function celdaNota(alumno) {
-  // Blackboard muestra "--" en el campo de nota cuando todavía no hay
-  // ninguna puesta; se deja tal cual para no inventar un 0 que no existe.
-  const nota = alumno.nota && alumno.nota !== "--" ? alumno.nota : "—";
-  return alumno.sobre && nota !== "—" ? `${nota} / ${alumno.sobre}` : nota;
+async function obtenerNotasDeTipo(nombreElemento) {
+  const curso = cursoNotasSeleccionado();
+  if (!curso || !curso.id) {
+    return;
+  }
+
+  limpiarResultadoNotas();
+  mensajeNotas.textContent = "";
+  textoCargandoNotas.textContent = `Leyendo las notas de "${nombreElemento}"...`;
+  bloquearBotonesTiposNota(true);
+
+  try {
+    const resultado = await ejecutarTareaDeFondo(
+      "/api/notas/obtener",
+      "/api/notas/obtener/estado",
+      { id_curso: curso.id, codigo_curso: curso.codigo, elemento: nombreElemento },
+      cargandoNotas,
+      textoCargandoNotas
+    );
+
+    if (resultado.estado !== "ok") {
+      mensajeNotas.textContent = resultado.error || "No se pudieron obtener las notas.";
+      return;
+    }
+    await cargarNotasGuardadasDelCurso();
+  } catch (error) {
+    mensajeNotas.textContent = error.message;
+  } finally {
+    bloquearBotonesTiposNota(false);
+  }
 }
 
-function renderizarTablaNotas(resultado) {
-  const alumnos = resultado.alumnos || [];
+// --- Ver, que solo muestra lo ya descargado ---
+
+function verNotasDeTipo(nombreElemento) {
+  const guardado = notasGuardadasActuales[nombreElemento];
+  if (!guardado) {
+    return;
+  }
+
+  const alumnos = guardado.alumnos || [];
   cuerpoTablaNotas.innerHTML = "";
 
   alumnos.forEach((alumno, indice) => {
@@ -2588,42 +3017,11 @@ function renderizarTablaNotas(resultado) {
 
   const conNota = alumnos.filter((alumno) => alumno.nota && alumno.nota !== "--").length;
   resumenNotas.textContent =
-    `${resultado.elemento}: ${alumnos.length} alumno(s), ${conNota} con nota puesta` +
-    (resultado.sobre ? ` (sobre ${resultado.sobre}).` : ".");
+    `${nombreElemento}: ${alumnos.length} alumno(s), ${conNota} con nota puesta` +
+    (guardado.sobre ? ` (sobre ${guardado.sobre}).` : ".") +
+    ` Descargadas el ${fechaLegibleNotas(guardado.obtenido_en)}.`;
   resumenNotas.classList.remove("oculto");
   contenedorTablaNotas.classList.remove("oculto");
-}
-
-async function cargarNotasDelElemento() {
-  const curso = cursoNotasSeleccionado();
-  if (!curso || !curso.id || !campoElementoNotas.value) {
-    return;
-  }
-
-  limpiarResultadoNotas();
-  mensajeNotas.textContent = "";
-  botonCargarNotas.disabled = true;
-  textoCargandoNotas.textContent = "Leyendo las notas de todos los alumnos...";
-
-  try {
-    const resultado = await ejecutarTareaDeFondo(
-      "/api/notas/obtener",
-      "/api/notas/obtener/estado",
-      { id_curso: curso.id, elemento: campoElementoNotas.value },
-      cargandoNotas,
-      textoCargandoNotas
-    );
-
-    if (resultado.estado !== "ok") {
-      mensajeNotas.textContent = resultado.error || "No se pudieron obtener las notas.";
-      return;
-    }
-    renderizarTablaNotas(resultado);
-  } catch (error) {
-    mensajeNotas.textContent = error.message;
-  } finally {
-    botonCargarNotas.disabled = false;
-  }
 }
 
 function abrirDialogoNotas() {
@@ -2638,15 +3036,16 @@ function abrirDialogoNotas() {
   }
 
   mensajeNotas.textContent = "";
-  limpiarResultadoNotas();
   dialogoNotas.showModal();
-  // El segundo combo se llena solo, consultando Blackboard: así el docente
-  // no tiene que hacer un clic extra solo para ver qué exámenes hay.
-  cargarElementosDelCurso();
+  cargarNotasGuardadasDelCurso();
 }
 
 botonObtenerNotas.addEventListener("click", abrirDialogoNotas);
-campoCursoNotas.addEventListener("change", cargarElementosDelCurso);
-campoElementoNotas.addEventListener("change", limpiarResultadoNotas);
-botonCargarNotas.addEventListener("click", cargarNotasDelElemento);
+// Cambiar de curso no consulta Blackboard: solo muestra lo que ya estaba
+// guardado de ese otro curso.
+campoCursoNotas.addEventListener("change", () => {
+  mensajeNotas.textContent = "";
+  cargarNotasGuardadasDelCurso();
+});
+botonBuscarTiposNotas.addEventListener("click", buscarTiposNotaEnBlackboard);
 botonCerrarNotas.addEventListener("click", () => dialogoNotas.close());

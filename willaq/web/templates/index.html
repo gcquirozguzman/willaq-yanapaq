@@ -39,26 +39,49 @@
           Presiona "Iniciar sesión" para abrir Blackboard y verificar tu acceso.
         </p>
 
-        <div class="botonera">
-          <button id="boton-iniciar-login" class="boton boton-primario" type="button">
-            Iniciar sesión
-          </button>
-          <button id="boton-confirmar-login-manual" class="boton boton-secundario oculto" type="button">
-            Ya completé el login, continuar
-          </button>
-          <button id="boton-confirmar-cierre" class="boton boton-secundario oculto" type="button">
-            Cerrar navegador
-          </button>
-        </div>
-
         <div id="cargando" class="cargando oculto">
           <span class="spinner" aria-hidden="true"></span>
           <span id="texto-cargando">Trabajando...</span>
         </div>
 
+        <!-- Los dos sistemas de Cibertec que la herramienta usa, cada uno
+             con su propia sesión: Blackboard (arriba, con el botón grande)
+             y Gestión Docente, que caduca más seguido y por eso se
+             comprueba sola al abrir el panel. -->
+        <ul class="lista-sesiones">
+          <li class="item-sesion">
+            <span id="punto-sesion-blackboard" class="punto-sesion"></span>
+            <div>
+              <p class="nombre-sesion">Blackboard</p>
+              <p class="estado-sesion" id="estado-sesion-blackboard">Sin verificar</p>
+            </div>
+            <button id="boton-iniciar-login" class="boton-pequeno" type="button">Iniciar sesión</button>
+            <button id="boton-confirmar-login-manual" class="boton-pequeno oculto" type="button">
+              Ya completé el login
+            </button>
+            <button id="boton-confirmar-cierre" class="boton-pequeno oculto" type="button">
+              Cerrar navegador
+            </button>
+          </li>
+          <li class="item-sesion">
+            <span id="punto-sesion-gestion" class="punto-sesion"></span>
+            <div>
+              <p class="nombre-sesion">Gestión Docente</p>
+              <p class="estado-sesion" id="estado-sesion-gestion">Comprobando...</p>
+            </div>
+            <!-- A diferencia de Blackboard, aquí no se abre ninguna ventana
+                 para iniciar sesión: se piden usuario y contraseña en un
+                 modal, se comprueban contra el portal y quedan guardados
+                 para que la herramienta pueda entrar sola cuando los
+                 necesite. -->
+            <button id="boton-login-gestion" class="boton-pequeno" type="button">Iniciar sesión</button>
+          </li>
+        </ul>
+
         <details class="detalles-tecnicos">
           <summary>Ver detalles técnicos</summary>
           <pre id="registro-login" class="registro"></pre>
+          <pre id="registro-gestion" class="registro"></pre>
         </details>
       </section>
 
@@ -134,10 +157,21 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6a1 1 0 0 1 1 1v1H8V4a1 1 0 0 1 1-1z"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/><path d="M8 12l2 2 4-4"/><path d="M8 17h8"/></svg>
             </div>
             <div>
-              <p class="nombre-herramienta">Obtener Notas</p>
+              <p class="nombre-herramienta">Obtener Notas Blackboard</p>
               <p class="estado-herramienta" id="estado-notas">Obtén tus cursos primero</p>
             </div>
             <button id="boton-obtener-notas" class="boton-pequeno" type="button" disabled>Obtener</button>
+          </li>
+          <li id="item-procesar-notas-gd" class="item-herramienta bloqueada">
+            <div class="icono-herramienta">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v5H4z"/><path d="M4 13h7v7H4z"/><path d="M15 13h5v7h-5z"/><path d="M13 16.5h2"/></svg>
+            </div>
+            <div>
+              <p class="nombre-herramienta">Procesar Notas Gestión Docente</p>
+              <p class="estado-herramienta" id="estado-procesar-notas-gd">Inicia sesión en Gestión Docente</p>
+            </div>
+            <button id="boton-procesar-notas-gd" class="boton-pequeno" type="button" disabled>Abrir</button>
+            <button id="boton-cerrar-procesar-notas-gd" class="boton-pequeno oculto" type="button">Cerrar</button>
           </li>
           <li class="item-herramienta pendiente">
             <div class="icono-herramienta">
@@ -171,8 +205,14 @@
       </p>
       <p class="descripcion-dialogo">
         Al terminar te preguntará <strong>con qué grupos de cursos</strong> (los períodos con los que
-        Blackboard los agrupa) quieres trabajar. <strong>No se borra nada</strong>: lo que ya tengas
-        configurado de fechas, anuncios y horarios se conserva.
+        Blackboard los agrupa) quieres trabajar.
+      </p>
+      <p class="descripcion-dialogo">
+        Los cursos obtenidos se guardarán y con ellos trabajará todo el flujo (fechas de cada curso,
+        Generar Anuncios Semanales, Generar Sesiones Dictado, Obtener Notas y demás herramientas),
+        <strong>hasta que vuelvas a hacer clic en "Obtener Cursos Activos"</strong>: eso borrará esas
+        configuraciones guardadas, junto con los tipos de nota y las notas ya descargadas, y el flujo
+        empezará de nuevo.
       </p>
       <div class="botonera">
         <button type="button" id="boton-confirmar-obtener-cursos" class="boton boton-primario">Sí, obtener</button>
@@ -548,6 +588,41 @@
     </div>
   </dialog>
 
+  <dialog id="dialogo-login-gestion" class="dialogo">
+    <div class="dialogo-contenido">
+      <h2>Iniciar sesión en Gestión Docente</h2>
+      <p class="descripcion-dialogo">
+        Escribe el mismo usuario y contraseña con los que entras a
+        <strong>gestiondocente.cibertec.edu.pe</strong>. Se comprueban entrando de verdad al
+        portal y, si funcionan, quedan guardados <strong>solo en esta computadora</strong>,
+        cifrados por Windows, para que la herramienta pueda entrar sola cuando los necesite
+        (la sesión de ese portal no se puede conservar de otra forma).
+      </p>
+
+      <div class="fila-campos">
+        <label class="campo">
+          <span class="etiqueta-campo">Usuario</span>
+          <input type="text" id="campo-usuario-gestion" autocomplete="off" spellcheck="false">
+        </label>
+        <label class="campo">
+          <span class="etiqueta-campo">Contraseña</span>
+          <input type="password" id="campo-clave-gestion" autocomplete="off">
+        </label>
+      </div>
+      <p id="mensaje-login-gestion" class="mensaje-cursos"></p>
+
+      <div class="botonera">
+        <button type="button" id="boton-guardar-login-gestion" class="boton boton-primario">
+          Iniciar sesión
+        </button>
+        <button type="button" id="boton-olvidar-login-gestion" class="boton boton-secundario oculto">
+          Olvidar credenciales
+        </button>
+        <button type="button" id="boton-cancelar-login-gestion" class="boton boton-secundario">Cancelar</button>
+      </div>
+    </div>
+  </dialog>
+
   <dialog id="dialogo-grupos-cursos" class="dialogo">
     <div class="dialogo-contenido">
       <h2>¿Qué grupos de cursos usar?</h2>
@@ -570,21 +645,26 @@
     <div class="dialogo-contenido">
       <h2>Obtener notas</h2>
       <p class="descripcion-dialogo">
-        Elige el curso y luego la nota que quieres ver. Se leen del Libro de calificaciones
-        de Blackboard las notas de <strong>todos</strong> los alumnos del curso. Esta herramienta
-        solo lee: no cambia ninguna nota. No se listan los cuestionarios ni los minicuestionarios.
+        Elige el curso y pulsa <strong>Buscar tipos de nota</strong>. Luego, en cada tipo,
+        <strong>Obtener</strong> descarga de Blackboard las notas de <strong>todos</strong> los
+        alumnos y <strong>Ver</strong> las muestra aquí abajo. Lo descargado queda guardado: la
+        próxima vez sale al instante y solo vuelve a consultarse cuando tú lo pidas. Esta
+        herramienta solo lee: no cambia ninguna nota. No se listan los cuestionarios ni los
+        minicuestionarios.
       </p>
 
-      <div class="fila-campos">
-        <label class="campo">
+      <div class="fila-campos fila-campos-alineada-abajo">
+        <label class="campo campo-curso-notas">
           <span class="etiqueta-campo">Curso</span>
           <select id="campo-curso-notas" required></select>
         </label>
-        <label class="campo">
-          <span class="etiqueta-campo">Nota que deseas</span>
-          <select id="campo-elemento-notas" required disabled></select>
-        </label>
+        <button type="button" id="boton-buscar-tipos-notas" class="boton boton-secundario">
+          Buscar tipos de nota
+        </button>
       </div>
+
+      <p id="fecha-tipos-notas" class="fecha-obtencion-cursos"></p>
+      <ul id="lista-tipos-notas" class="lista-tipos-notas"></ul>
 
       <p id="mensaje-notas" class="mensaje-cursos"></p>
 
@@ -611,9 +691,6 @@
       </div>
 
       <div class="botonera">
-        <button type="button" id="boton-cargar-notas" class="boton boton-primario" disabled>
-          Obtener notas
-        </button>
         <button type="button" id="boton-cerrar-notas" class="boton boton-secundario">Cerrar</button>
       </div>
     </div>

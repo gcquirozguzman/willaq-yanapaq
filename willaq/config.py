@@ -18,10 +18,24 @@ DIR_BASE = Path(__file__).resolve().parent.parent
 # para todos los profesores que usan esta herramienta.
 URL_BLACKBOARD = "https://cibertec.blackboard.com/"
 
+# Portal de Gestión Docente de Cibertec. Es un sistema aparte de Blackboard,
+# con su propio login (usuario y contraseña, sin código SMS) y su propia
+# sesión, que caduca bastante más seguido que la de Blackboard.
+URL_GESTION_DOCENTE = "https://gestiondocente.cibertec.edu.pe/"
+
+# Pantalla de Gestión Docente donde se registran las notas de un curso.
+URL_GESTION_DOCENTE_REGISTRO_NOTAS = URL_GESTION_DOCENTE + "Academico/Secure/RegNotas.aspx"
+
 # Carpeta donde se guarda el perfil de navegador (cookies, sesión iniciada).
 # Es información sensible y personal de cada profesor: nunca se sube al repo.
 DIR_DATOS = DIR_BASE / "datos"
 DIR_PERFIL_NAVEGADOR = DIR_DATOS / "perfil_navegador"
+
+# Gestión Docente no tiene perfil de navegador propio a propósito: su
+# sesión no sobrevive a cerrar el navegador (ver
+# willaq/autenticacion/gestion_docente.py), así que la herramienta entra
+# con un navegador limpio cada vez, usando el usuario y la contraseña
+# guardados en datos/credenciales_gestion_docente.json.
 
 # Carpeta donde se guardan los archivos Excel generados (plantillas de anuncios, etc.)
 DIR_PLANTILLAS = DIR_BASE / "plantillas_generadas"

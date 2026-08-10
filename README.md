@@ -74,6 +74,19 @@ La primera vez que inicias sesión se abre una ventana de Blackboard aparte
 para que ingreses tu usuario, clave y código SMS a mano. Las siguientes
 veces normalmente no te lo vuelve a pedir.
 
+El panel usa dos sistemas de Cibertec, cada uno con su propia sesión, y te
+muestra el estado de ambas:
+
+- **Blackboard**, para los cursos, anuncios, sesiones de dictado y notas.
+- **Gestión Docente**, para pasar las notas. Aquí "Iniciar sesión" te pide
+  tu usuario y contraseña en el propio panel: se comprueban entrando al
+  portal y, si funcionan, quedan guardados en tu computadora (cifrados por
+  Windows, en `datos/`, que nunca se sube a ningún lado). Hace falta
+  guardarlos porque ese portal no permite conservar la sesión, así que la
+  herramienta vuelve a entrar sola cada vez que la necesita. Si alguna vez
+  cambias tu contraseña, el panel te avisa y la vuelves a escribir ahí
+  mismo; con "Olvidar credenciales" puedes borrarla cuando quieras.
+
 > **Nota:** el comando usa el Python de la carpeta `.venv` (y no solo
 > `python`) para que funcione siempre, sin tener que "activar" nada. En
 > Windows el `.\` del inicio es obligatorio: PowerShell no ejecuta rutas

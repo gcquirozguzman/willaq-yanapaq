@@ -21,13 +21,23 @@ from flask import Flask, jsonify, render_template, request, send_file
 
 from willaq.anuncios.plantilla import generar_plantilla
 from willaq.anuncios.publicar import generar_anuncios_en_blackboard
-from willaq.anuncios.semanal import guardar_configuracion_semanal, obtener_configuracion_semanal
+from willaq.anuncios.semanal import (
+    guardar_configuracion_semanal,
+    obtener_configuracion_semanal,
+    reiniciar_configuraciones as reiniciar_anuncios_semanales,
+)
+from willaq.autenticacion import credenciales as credenciales_gestion_docente
+from willaq.autenticacion import gestion_docente
 from willaq.autenticacion.login import (
     RUTA_AVATAR_DOCENTE,
     cargar_estado_sesion_guardado,
     ejecutar_login,
 )
-from willaq.cursos.fechas import guardar_fechas_curso, obtener_todas_las_fechas
+from willaq.cursos.fechas import (
+    guardar_fechas_curso,
+    obtener_todas_las_fechas,
+    reiniciar_configuraciones as reiniciar_fechas_cursos,
+)
 from willaq.cursos.listar import (
     cargar_cursos_guardados,
     cargar_grupos_elegidos,
@@ -36,13 +46,25 @@ from willaq.cursos.listar import (
 )
 from willaq.dictado.feriados import guardar_feriados, obtener_feriados
 from willaq.dictado.publicar import eliminar_sesiones_en_blackboard, generar_sesiones_en_blackboard
-from willaq.dictado.reprogramaciones import guardar_reprogramacion, obtener_reprogramaciones_curso
+from willaq.dictado.reprogramaciones import (
+    guardar_reprogramacion,
+    obtener_reprogramaciones_curso,
+    reiniciar_configuraciones as reiniciar_reprogramaciones,
+)
 from willaq.dictado.sesiones import (
     guardar_configuracion_sesiones,
     obtener_configuracion_sesiones,
     obtener_todas_las_configuraciones as obtener_todas_las_sesiones,
+    reiniciar_configuraciones as reiniciar_sesiones_dictado,
 )
 from willaq.notas.consultar import obtener_elementos_calificables, obtener_notas_de_elemento
+from willaq.notas.guardado import (
+    guardar_notas,
+    guardar_tipos_nota,
+    obtener_notas_de_curso,
+    obtener_tipos_nota,
+    reiniciar_configuraciones as reiniciar_notas,
+)
 from willaq.web.estado import (
     estado_cursos,
     estado_eliminar_sesiones,
@@ -50,7 +72,9 @@ from willaq.web.estado import (
     estado_generar_anuncios,
     estado_generar_sesiones,
     estado_login,
+    estado_login_gestion_docente,
     estado_notas,
+    estado_procesar_notas_gd,
 )
 
 
@@ -104,6 +128,74 @@ def crear_app() -> Flask:
     @app.get("/api/login/estado")
     def consultar_estado_login():
         return jsonify(estado_login.snapshot())
+
+    @app.post("/api/gestion-docente/verificar")
+    def verificar_sesion_gestion_docente():
+        if estado_login_gestion_docente.en_progreso:
+            return jsonify({"error": "Ya hay una operación en curso en Gestión Docente."}), 409
+
+        estado_login_gestion_docente.iniciar(fase="verificando")
+        hilo = threading.Thread(target=_verificar_gestion_docente_en_hilo, daemon=True)
+        hilo.start()
+        return jsonify({"ok": True})
+
+    @app.get("/api/gestion-docente/credenciales")
+    def consultar_credenciales_gestion_docente():
+        """Dice si ya hay credenciales guardadas (nunca devuelve la contraseña)."""
+        guardadas = credenciales_gestion_docente.cargar()
+        return jsonify(
+            {
+                "hay_credenciales": guardadas is not None,
+                "usuario": (guardadas or {}).get("usuario", ""),
+            }
+        )
+
+    @app.post("/api/gestion-docente/login/iniciar")
+    def iniciar_login_gestion_docente():
+        if estado_login_gestion_docente.en_progreso:
+            return jsonify({"error": "Ya hay una operación en curso en Gestión Docente."}), 409
+
+        datos = request.get_json(silent=True) or {}
+        usuario = (datos.get("usuario") or "").strip()
+        clave = datos.get("clave") or ""
+        if not usuario or not clave:
+            return jsonify({"error": "Escribe tu usuario y tu contraseña."}), 400
+
+        estado_login_gestion_docente.iniciar()
+        hilo = threading.Thread(
+            target=_login_gestion_docente_en_hilo, args=(usuario, clave), daemon=True
+        )
+        hilo.start()
+        return jsonify({"ok": True})
+
+    @app.post("/api/gestion-docente/login/olvidar")
+    def olvidar_credenciales_gestion_docente():
+        credenciales_gestion_docente.olvidar()
+        estado_login_gestion_docente.marcar_terminado("sin_credenciales", sesion_activa=False)
+        return jsonify({"ok": True})
+
+    @app.get("/api/gestion-docente/estado")
+    def consultar_estado_gestion_docente():
+        return jsonify(estado_login_gestion_docente.snapshot())
+
+    @app.post("/api/gestion-docente/procesar-notas/abrir")
+    def abrir_procesar_notas_gd():
+        if estado_procesar_notas_gd.en_progreso:
+            return jsonify({"error": "La pantalla de notas ya está abierta."}), 409
+
+        estado_procesar_notas_gd.iniciar()
+        hilo = threading.Thread(target=_procesar_notas_gd_en_hilo, daemon=True)
+        hilo.start()
+        return jsonify({"ok": True})
+
+    @app.post("/api/gestion-docente/procesar-notas/cerrar")
+    def cerrar_procesar_notas_gd():
+        estado_procesar_notas_gd.evento_cierre.set()
+        return jsonify({"ok": True})
+
+    @app.get("/api/gestion-docente/procesar-notas/estado")
+    def consultar_estado_procesar_notas_gd():
+        return jsonify(estado_procesar_notas_gd.snapshot())
 
     @app.get("/api/avatar")
     def avatar_docente():
@@ -262,7 +354,7 @@ def crear_app() -> Flask:
         estado_elementos_notas.iniciar()
         hilo = threading.Thread(
             target=_obtener_elementos_notas_en_hilo,
-            args=(datos.get("id_curso"),),
+            args=(datos.get("id_curso"), datos.get("codigo_curso")),
             daemon=True,
         )
         hilo.start()
@@ -281,7 +373,7 @@ def crear_app() -> Flask:
         estado_notas.iniciar()
         hilo = threading.Thread(
             target=_obtener_notas_en_hilo,
-            args=(datos.get("id_curso"), datos.get("elemento")),
+            args=(datos.get("id_curso"), datos.get("elemento"), datos.get("codigo_curso")),
             daemon=True,
         )
         hilo.start()
@@ -290,6 +382,23 @@ def crear_app() -> Flask:
     @app.get("/api/notas/obtener/estado")
     def consultar_estado_notas():
         return jsonify(estado_notas.snapshot())
+
+    @app.get("/api/notas/guardadas/<codigo_curso>")
+    def consultar_notas_guardadas(codigo_curso):
+        """Todo lo que ya se descargó de un curso, sin tocar Blackboard.
+
+        Es lo que hace que abrir "Obtener notas" sea instantáneo: los tipos
+        de nota y las notas de cada uno se leen de disco, y solo se vuelve a
+        consultar Blackboard cuando el docente lo pide con un botón.
+        """
+        guardado = obtener_tipos_nota(codigo_curso) or {}
+        return jsonify(
+            {
+                "elementos": guardado.get("elementos") or [],
+                "obtenido_en": guardado.get("obtenido_en"),
+                "notas": obtener_notas_de_curso(codigo_curso),
+            }
+        )
 
     return app
 
@@ -334,6 +443,92 @@ def _ejecutar_login_en_hilo():
         estado_login.marcar_terminado("error", error=str(error))
 
 
+def _verificar_gestion_docente_en_hilo():
+    """Comprueba en segundo plano si se puede entrar a Gestión Docente.
+
+    Como este portal no conserva sesión (ver
+    willaq/autenticacion/gestion_docente.py), lo que se comprueba es que el
+    usuario y la contraseña guardados sigan sirviendo. Por ahora la
+    comprobación se ve en pantalla (MOSTRAR_NAVEGADOR_AL_PROBAR), mientras
+    terminamos de entender cómo se comporta el portal.
+    """
+
+    def notificar(mensaje):
+        estado_login_gestion_docente.agregar_log(mensaje)
+
+    try:
+        resultado = gestion_docente.verificar_sesion(notificar=notificar)
+        estado_login_gestion_docente.marcar_terminado(
+            resultado.get("estado"),
+            error=resultado.get("error"),
+            sesion_activa=resultado.get("estado") == "activa",
+        )
+    except Exception as error:
+        estado_login_gestion_docente.agregar_log(f"[ERROR] Ocurrió un problema inesperado: {error}")
+        estado_login_gestion_docente.marcar_terminado("error", error=str(error), sesion_activa=False)
+
+
+def _login_gestion_docente_en_hilo(usuario: str, clave: str):
+    """Prueba el usuario y la contraseña de Gestión Docente y los guarda si sirven.
+
+    Corre en un hilo aparte porque abre un navegador y entra de verdad al
+    portal: es la única forma de saber si las credenciales valen, y tarda
+    unos segundos.
+    """
+
+    def notificar(mensaje):
+        estado_login_gestion_docente.agregar_log(mensaje)
+
+    try:
+        resultado = gestion_docente.guardar_y_probar_credenciales(
+            usuario, clave, notificar=notificar
+        )
+        estado = resultado.get("estado")
+        estado_login_gestion_docente.marcar_terminado(
+            estado, error=resultado.get("error"), sesion_activa=estado == "activa"
+        )
+    except Exception as error:
+        estado_login_gestion_docente.agregar_log(f"[ERROR] Ocurrió un problema inesperado: {error}")
+        estado_login_gestion_docente.marcar_terminado("error", error=str(error), sesion_activa=False)
+
+
+def _procesar_notas_gd_en_hilo():
+    """Abre la pantalla de registro de notas de Gestión Docente en un hilo aparte.
+
+    La ventana queda abierta para que el docente trabaje en ella, así que
+    este hilo vive mientras dure eso; por eso corre aparte y no bloqueando
+    la petición HTTP.
+    """
+
+    def notificar(mensaje):
+        estado_procesar_notas_gd.agregar_log(mensaje)
+
+    def marcar_abierta():
+        estado_procesar_notas_gd.marcar_fase("esperando_cierre")
+
+    def cancelado():
+        return estado_procesar_notas_gd.evento_cierre.is_set()
+
+    try:
+        resultado = gestion_docente.abrir_registro_de_notas(
+            notificar=notificar,
+            marcar_abierta=marcar_abierta,
+            cancelado=cancelado,
+        )
+        # Si el portal rechazó las credenciales guardadas, la fila de sesión
+        # del panel tiene que enterarse: ya no hay con qué entrar.
+        if resultado in ("sin_credenciales", "credenciales"):
+            estado_login_gestion_docente.marcar_terminado(resultado, sesion_activa=False)
+        estado_procesar_notas_gd.marcar_terminado(
+            resultado, sesion_activa=resultado not in ("sin_credenciales", "credenciales")
+        )
+    except Exception as error:
+        estado_procesar_notas_gd.agregar_log(f"[ERROR] Ocurrió un problema inesperado: {error}")
+        estado_procesar_notas_gd.marcar_terminado("error", error=str(error))
+    finally:
+        estado_procesar_notas_gd.evento_cierre.clear()
+
+
 def _obtener_cursos_en_hilo():
     """Corre la búsqueda de cursos en un hilo aparte, igual que el login."""
 
@@ -343,14 +538,22 @@ def _obtener_cursos_en_hilo():
     info_actualizacion = {}
     try:
         cursos = obtener_cursos_activos(notificar=notificar, info_actualizacion=info_actualizacion)
-        # Antes, al renovar la lista de cursos se borraba la configuración
-        # guardada de fechas de curso, Anuncios Semanales, Sesiones Dictado
-        # y reprogramaciones. Ya no: volver a obtener los cursos es ahora
-        # también la forma de elegir con qué grupos (períodos) trabajar, así
-        # que hacerlo no puede costar perder todo lo configurado. La
-        # configuración se guarda por código de curso, de modo que la de un
-        # curso que ya no esté en la lista simplemente deja de usarse, sin
-        # estorbar ni pisar nada.
+        if info_actualizacion.get("actualizado"):
+            # La lista de cursos es la base de todo el flujo (fechas de cada
+            # curso, Anuncios Semanales, Sesiones Dictado, y los tipos de
+            # nota y las notas guardadas de "Obtener notas"): al renovarla de
+            # verdad (no cuando se mantuvo la lista guardada por un fallo),
+            # se empieza de cero también en todas ellas, como se advierte en
+            # el modal de confirmación antes de obtener los cursos.
+            reiniciar_fechas_cursos()
+            reiniciar_anuncios_semanales()
+            reiniciar_sesiones_dictado()
+            reiniciar_reprogramaciones()
+            reiniciar_notas()
+            notificar(
+                "Se reinició la configuración de fechas de curso, Anuncios Semanales, "
+                "Sesiones Dictado y las notas guardadas."
+            )
         guardado = cargar_cursos_guardados()
         obtenido_en = guardado.get("obtenido_en") if guardado else None
         estado_cursos.marcar_terminado("ok", cursos=cursos, obtenido_en=obtenido_en)
@@ -415,7 +618,7 @@ def _eliminar_sesiones_en_blackboard_en_hilo(id_curso):
         estado_eliminar_sesiones.marcar_terminado(error=str(error))
 
 
-def _obtener_elementos_notas_en_hilo(id_curso):
+def _obtener_elementos_notas_en_hilo(id_curso, codigo_curso):
     """Busca en un hilo aparte los exámenes/actividades calificables del curso."""
 
     def notificar(mensaje):
@@ -423,13 +626,17 @@ def _obtener_elementos_notas_en_hilo(id_curso):
 
     try:
         resultado = obtener_elementos_calificables(id_curso, notificar=notificar)
+        if resultado.get("estado") == "ok":
+            # Se guardan para que la próxima vez que se abra el panel la
+            # lista salga al instante, sin volver a abrir el navegador.
+            guardar_tipos_nota(codigo_curso, resultado.get("elementos"))
         estado_elementos_notas.marcar_terminado(resultado=resultado)
     except Exception as error:
         estado_elementos_notas.agregar_log(f"[ERROR] Ocurrió un problema inesperado: {error}")
         estado_elementos_notas.marcar_terminado(error=str(error))
 
 
-def _obtener_notas_en_hilo(id_curso, nombre_elemento):
+def _obtener_notas_en_hilo(id_curso, nombre_elemento, codigo_curso):
     """Lee en un hilo aparte las notas de todos los alumnos de un elemento."""
 
     def notificar(mensaje):
@@ -443,6 +650,8 @@ def _obtener_notas_en_hilo(id_curso, nombre_elemento):
 
     try:
         resultado = obtener_notas_de_elemento(id_curso, nombre_elemento, notificar=notificar)
+        if resultado.get("estado") == "ok":
+            guardar_notas(codigo_curso, nombre_elemento, resultado)
         estado_notas.marcar_terminado(resultado=resultado)
     except Exception as error:
         estado_notas.agregar_log(f"[ERROR] Ocurrió un problema inesperado: {error}")
