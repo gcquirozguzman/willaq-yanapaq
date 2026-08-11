@@ -23,6 +23,14 @@ from willaq.config import DIR_DATOS
 RUTA_TIPOS_NOTA = DIR_DATOS / "tipos_nota.json"
 RUTA_NOTAS = DIR_DATOS / "notas_alumnos.json"
 
+# Los tipos de nota de Gestión Docente van aparte de los de Blackboard: son
+# listas distintas y sirven para cosas distintas. En Blackboard son los
+# exámenes y actividades tal como los armó el docente; aquí son las casillas
+# oficiales donde hay que registrar la nota (T1, T2, EF, RE...). Conseguir
+# los de Gestión Docente cuesta bastante más —hay que validar un token a
+# mano—, así que guardarlos evita repetir todo ese camino.
+RUTA_TIPOS_NOTA_GD = DIR_DATOS / "tipos_nota_gestion_docente.json"
+
 
 def _cargar(ruta) -> dict:
     try:
@@ -58,6 +66,20 @@ def obtener_tipos_nota(curso_codigo: str):
     return _cargar(RUTA_TIPOS_NOTA).get(curso_codigo)
 
 
+def guardar_tipos_nota_gd(curso_codigo: str, tipos: list):
+    """Guarda los tipos de nota de Gestión Docente de un curso (T1, EF...)."""
+    if not curso_codigo:
+        return
+    todos = _cargar(RUTA_TIPOS_NOTA_GD)
+    todos[curso_codigo] = {"tipos": tipos or [], "obtenido_en": _ahora()}
+    _guardar(RUTA_TIPOS_NOTA_GD, todos)
+
+
+def obtener_tipos_nota_gd(curso_codigo: str):
+    """Devuelve {"tipos": [...], "obtenido_en": "..."} de un curso, o None."""
+    return _cargar(RUTA_TIPOS_NOTA_GD).get(curso_codigo)
+
+
 def guardar_notas(curso_codigo: str, elemento: str, resultado: dict):
     """Guarda las notas de todos los alumnos de un tipo de nota del curso."""
     if not curso_codigo or not elemento:
@@ -87,3 +109,4 @@ def reiniciar_configuraciones():
     """
     _guardar(RUTA_TIPOS_NOTA, {})
     _guardar(RUTA_NOTAS, {})
+    _guardar(RUTA_TIPOS_NOTA_GD, {})

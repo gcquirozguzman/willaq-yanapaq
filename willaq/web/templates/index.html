@@ -162,16 +162,17 @@
             </div>
             <button id="boton-obtener-notas" class="boton-pequeno" type="button" disabled>Obtener</button>
           </li>
-          <li id="item-procesar-notas-gd" class="item-herramienta bloqueada">
+          <!-- Siempre disponible: no depende de tener cursos ni sesión;
+               lo que falte se avisa dentro del propio diálogo. -->
+          <li id="item-procesar-notas-gd" class="item-herramienta">
             <div class="icono-herramienta">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v5H4z"/><path d="M4 13h7v7H4z"/><path d="M15 13h5v7h-5z"/><path d="M13 16.5h2"/></svg>
             </div>
             <div>
               <p class="nombre-herramienta">Procesar Notas Gestión Docente</p>
-              <p class="estado-herramienta" id="estado-procesar-notas-gd">Inicia sesión en Gestión Docente</p>
+              <p class="estado-herramienta" id="estado-procesar-notas-gd">Disponible</p>
             </div>
-            <button id="boton-procesar-notas-gd" class="boton-pequeno" type="button" disabled>Abrir</button>
-            <button id="boton-cerrar-procesar-notas-gd" class="boton-pequeno oculto" type="button">Cerrar</button>
+            <button id="boton-procesar-notas-gd" class="boton-pequeno" type="button">Abrir</button>
           </li>
           <li class="item-herramienta pendiente">
             <div class="icono-herramienta">
@@ -692,6 +693,53 @@
 
       <div class="botonera">
         <button type="button" id="boton-cerrar-notas" class="boton boton-secundario">Cerrar</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="dialogo-procesar-notas-gd" class="dialogo dialogo-ancho">
+    <div class="dialogo-contenido">
+      <h2>Procesar notas en Gestión Docente</h2>
+      <p class="descripcion-dialogo">
+        Elige el curso y pulsa <strong>Buscar tipos de nota</strong>. Se abrirá una ventana que
+        entra sola a Gestión Docente, pasa por <strong>Académico</strong>, abre
+        <strong>Registro de Notas</strong> y pulsa el <strong>Ingresar notas</strong> del curso.
+        Ahí se detiene y te toca a ti: escribe el <strong>token</strong>, pulsa
+        <strong>Validar token</strong> y acepta el modal. En cuanto el portal habilite la lista,
+        se leen los tipos de nota y la ventana se cierra sola. Lo encontrado queda guardado, así
+        que no hay que repetir el token cada vez.
+      </p>
+
+      <div class="fila-campos fila-campos-alineada-abajo">
+        <label class="campo campo-curso-notas">
+          <span class="etiqueta-campo">Curso</span>
+          <select id="campo-curso-notas-gd" required></select>
+        </label>
+        <button type="button" id="boton-buscar-tipos-notas-gd" class="boton boton-secundario">
+          Buscar tipos de nota
+        </button>
+      </div>
+
+      <p id="fecha-tipos-notas-gd" class="fecha-obtencion-cursos"></p>
+      <ul id="lista-tipos-notas-gd" class="lista-tipos-notas"></ul>
+
+      <p id="mensaje-notas-gd" class="mensaje-cursos"></p>
+
+      <div id="cargando-notas-gd" class="cargando oculto">
+        <span class="spinner" aria-hidden="true"></span>
+        <span id="texto-cargando-notas-gd">Entrando a Gestión Docente...</span>
+      </div>
+
+      <details class="detalles-tecnicos">
+        <summary>Ver detalles técnicos</summary>
+        <pre id="registro-notas-gd" class="registro"></pre>
+      </details>
+
+      <div class="botonera">
+        <button type="button" id="boton-cancelar-tipos-notas-gd" class="boton boton-secundario oculto">
+          Cancelar
+        </button>
+        <button type="button" id="boton-cerrar-notas-gd" class="boton boton-secundario">Cerrar</button>
       </div>
     </div>
   </dialog>

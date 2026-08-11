@@ -245,6 +245,7 @@ function actualizarBloqueoHerramientas(sesionActiva) {
   actualizarBloqueoPlantilla();
   actualizarBloqueoSesionesDictado();
   actualizarBloqueoNotas();
+  actualizarBloqueoProcesarNotasGd();
 }
 
 // "Obtener Notas" solo necesita saber qué cursos hay (para elegir uno); a
@@ -307,9 +308,14 @@ botonConfirmarCierre.addEventListener("click", confirmarCierre);
 // guardar entre usos (ver willaq/autenticacion/gestion_docente.py). Lo que
 // se guarda es el usuario y la contraseña —cifrados por Windows, en esta
 // computadora— y la herramienta vuelve a entrar sola cuando los necesita.
-// Por eso "Iniciar sesión" abre un modal en vez de una ventana de
-// navegador, y lo que se comprueba al abrir el panel es que esas
-// credenciales sigan sirviendo.
+// Por eso "Iniciar sesión" abre un modal en vez de una ventana de navegador.
+//
+// Al abrir el panel NO se entra al portal a comprobar nada: solo se mira si
+// hay credenciales guardadas, que es una lectura de disco. Comprobarlas de
+// verdad significa abrir un navegador y hacer login, y hacer eso en cada
+// arranque era un gasto inútil, porque de todos modos cada herramienta
+// vuelve a iniciar sesión cuando la usas. Si en ese momento el portal las
+// rechaza, ahí sí se marcan como inválidas en esta fila.
 
 const puntoSesionBlackboard = document.getElementById("punto-sesion-blackboard");
 const estadoSesionBlackboard = document.getElementById("estado-sesion-blackboard");
@@ -342,18 +348,23 @@ function actualizarSesionBlackboardEnLista(sesionActiva) {
 const TEXTOS_GESTION = {
   activa: "Acceso verificado",
   sin_credenciales: "Falta tu usuario y contraseña",
-  credenciales: "Usuario o contraseña incorrectos",
+  credenciales: "Accesos inválidos, vuelve a escribirlos",
   error: "No se pudo comprobar",
 };
+
+// Deja la fila (y las herramientas que dependen de ella) reflejando si hay
+// unas credenciales utilizables o no.
+function marcarSesionGestion(utilizable, texto) {
+  sesionGestionActiva = utilizable;
+  pintarPuntoSesion(puntoSesionGestion, utilizable);
+  estadoSesionGestion.textContent = texto;
+  botonLoginGestion.textContent = utilizable ? "Cambiar datos" : "Iniciar sesión";
+  actualizarBloqueoProcesarNotasGd();
+}
 
 function actualizarSesionGestion(estado) {
   registroGestion.textContent = (estado.logs || []).join("\n");
 
-  if (estado.fase === "verificando") {
-    estadoSesionGestion.textContent = "Comprobando...";
-    botonLoginGestion.disabled = true;
-    return;
-  }
   if (estado.fase === "ejecutando") {
     estadoSesionGestion.textContent = "Entrando a Gestión Docente...";
     botonLoginGestion.disabled = true;
@@ -362,14 +373,10 @@ function actualizarSesionGestion(estado) {
   }
 
   botonLoginGestion.disabled = false;
-  sesionGestionActiva = estado.sesion_activa === true;
-  pintarPuntoSesion(puntoSesionGestion, estado.sesion_activa);
-  estadoSesionGestion.textContent =
-    TEXTOS_GESTION[estado.resultado] || (estado.sesion_activa ? "Acceso verificado" : "Sin verificar");
-  botonLoginGestion.textContent = sesionGestionActiva ? "Cambiar datos" : "Iniciar sesión";
-  // "Procesar Notas Gestión Docente" usa estas credenciales, así que su fila
-  // se actualiza junto con esta.
-  actualizarBloqueoProcesarNotasGd();
+  marcarSesionGestion(
+    estado.sesion_activa === true,
+    TEXTOS_GESTION[estado.resultado] || (estado.sesion_activa ? "Acceso verificado" : "Sin verificar")
+  );
 }
 
 async function consultarEstadoGestion() {
@@ -389,12 +396,19 @@ function seguirEstadoGestion() {
   intervaloConsultaGestion = setInterval(consultarEstadoGestion, 1000);
 }
 
-async function verificarSesionGestion() {
-  const respuesta = await fetch("/api/gestion-docente/verificar", { method: "POST" });
-  if (!respuesta.ok) {
-    return;  // ya hay algo corriendo; su propio sondeo actualizará la fila
+// Solo mira si hay credenciales guardadas: no entra al portal ni abre
+// ningún navegador. Es lo que se hace al abrir el panel.
+async function mirarCredencialesGestion() {
+  try {
+    const respuesta = await fetch("/api/gestion-docente/credenciales");
+    const datos = await respuesta.json();
+    marcarSesionGestion(
+      datos.hay_credenciales === true,
+      datos.hay_credenciales ? "Datos guardados" : TEXTOS_GESTION.sin_credenciales
+    );
+  } catch (error) {
+    marcarSesionGestion(false, TEXTOS_GESTION.sin_credenciales);
   }
-  seguirEstadoGestion();
 }
 
 // --- Modal de usuario y contraseña de Gestión Docente ---
@@ -480,7 +494,7 @@ botonOlvidarLoginGestion.addEventListener("click", async () => {
   campoClaveGestion.value = "";
   botonOlvidarLoginGestion.classList.add("oculto");
   mensajeLoginGestion.textContent = "Se borraron las credenciales guardadas.";
-  consultarEstadoGestion();
+  mirarCredencialesGestion();
 });
 // Enter en cualquiera de los dos campos equivale a pulsar el botón.
 [campoUsuarioGestion, campoClaveGestion].forEach((campo) => {
@@ -502,30 +516,104 @@ botonOlvidarLoginGestion.addEventListener("click", async () => {
 const itemProcesarNotasGd = document.getElementById("item-procesar-notas-gd");
 const estadoProcesarNotasGd = document.getElementById("estado-procesar-notas-gd");
 const botonProcesarNotasGd = document.getElementById("boton-procesar-notas-gd");
-const botonCerrarProcesarNotasGd = document.getElementById("boton-cerrar-procesar-notas-gd");
+
+const dialogoNotasGd = document.getElementById("dialogo-procesar-notas-gd");
+const campoCursoNotasGd = document.getElementById("campo-curso-notas-gd");
+const botonBuscarTiposNotasGd = document.getElementById("boton-buscar-tipos-notas-gd");
+const fechaTiposNotasGd = document.getElementById("fecha-tipos-notas-gd");
+const listaTiposNotasGd = document.getElementById("lista-tipos-notas-gd");
+const mensajeNotasGd = document.getElementById("mensaje-notas-gd");
+const cargandoNotasGd = document.getElementById("cargando-notas-gd");
+const textoCargandoNotasGd = document.getElementById("texto-cargando-notas-gd");
+const registroNotasGd = document.getElementById("registro-notas-gd");
+const botonCancelarTiposNotasGd = document.getElementById("boton-cancelar-tipos-notas-gd");
+const botonCerrarNotasGd = document.getElementById("boton-cerrar-notas-gd");
 
 let intervaloProcesarNotasGd = null;
+let tiposNotaGdActuales = [];
+let fechaTiposNotaGdActual = null;
 
-// Se bloquea solo si todavía no hay usuario y contraseña guardados, porque
-// sin ellos la herramienta no puede entrar al portal por su cuenta.
+// Esta herramienta no depende de nada más: se puede abrir siempre. Lo único
+// que la deshabilita es que ya haya una búsqueda en curso. Si falta algo
+// (cursos o credenciales), se dice dentro del propio diálogo, que es donde
+// el docente puede hacer algo al respecto.
 function actualizarBloqueoProcesarNotasGd() {
-  const abierta = intervaloProcesarNotasGd !== null;
-  botonProcesarNotasGd.disabled = abierta || !sesionGestionActiva;
-  itemProcesarNotasGd.classList.toggle("bloqueada", !sesionGestionActiva);
-  if (!abierta) {
-    estadoProcesarNotasGd.textContent = sesionGestionActiva
-      ? "Disponible"
-      : "Inicia sesión en Gestión Docente primero";
+  const trabajando = intervaloProcesarNotasGd !== null;
+  botonProcesarNotasGd.disabled = trabajando;
+  itemProcesarNotasGd.classList.remove("bloqueada");
+  if (!trabajando) {
+    estadoProcesarNotasGd.textContent = "Disponible";
   }
 }
+
+function cursoNotasGdSeleccionado() {
+  return cursosObtenidos.find((curso) => curso.codigo === campoCursoNotasGd.value);
+}
+
+function renderizarTiposNotaGd() {
+  fechaTiposNotasGd.textContent = fechaTiposNotaGdActual
+    ? `Tipos de nota obtenidos el ${fechaLegibleNotas(fechaTiposNotaGdActual)}`
+    : "";
+
+  listaTiposNotasGd.innerHTML = "";
+  if (tiposNotaGdActuales.length === 0) {
+    const item = document.createElement("li");
+    item.className = "mensaje-cursos";
+    item.textContent = 'Todavía no hay tipos de nota. Pulsa "Buscar tipos de nota".';
+    listaTiposNotasGd.appendChild(item);
+    return;
+  }
+
+  for (const tipo of tiposNotaGdActuales) {
+    const item = document.createElement("li");
+    item.className = "item-tipo-nota";
+    const datos = document.createElement("div");
+    const nombre = document.createElement("p");
+    nombre.className = "nombre-tipo-nota";
+    nombre.textContent = tipo.nombre;
+    datos.appendChild(nombre);
+    item.appendChild(datos);
+    listaTiposNotasGd.appendChild(item);
+  }
+}
+
+async function cargarTiposNotaGdGuardados() {
+  const curso = cursoNotasGdSeleccionado();
+  tiposNotaGdActuales = [];
+  fechaTiposNotaGdActual = null;
+
+  if (curso) {
+    try {
+      const respuesta = await fetch(
+        `/api/gestion-docente/procesar-notas/guardados/${encodeURIComponent(curso.codigo)}`
+      );
+      const datos = await respuesta.json();
+      tiposNotaGdActuales = datos.tipos || [];
+      fechaTiposNotaGdActual = datos.obtenido_en;
+    } catch (error) {
+      // Sin nada guardado, la lista queda vacía y ya invita a buscar.
+    }
+  }
+
+  renderizarTiposNotaGd();
+}
+
+const TEXTOS_ERROR_NOTAS_GD = {
+  sin_credenciales: 'Falta tu usuario y contraseña: usa "Iniciar sesión" en la tarjeta de sesiones.',
+  credenciales: "El portal rechazó tu usuario o contraseña; vuelve a escribirlos.",
+};
 
 async function consultarEstadoProcesarNotasGd() {
   const respuesta = await fetch("/api/gestion-docente/procesar-notas/estado");
   const estado = await respuesta.json();
+  registroNotasGd.textContent = (estado.logs || []).join("\n");
 
-  if (estado.fase === "esperando_cierre") {
-    estadoProcesarNotasGd.textContent = "Ventana abierta";
-    botonCerrarProcesarNotasGd.classList.remove("oculto");
+  if (estado.fase === "esperando_login_manual") {
+    // El portal está pidiendo el token: ese paso lo hace el docente en la
+    // ventana del navegador, así que aquí solo se avisa y se espera.
+    estadoProcesarNotasGd.textContent = "Esperando el token";
+    textoCargandoNotasGd.textContent =
+      'Escribe el token en la ventana, pulsa "Validar token" y acepta el modal...';
     return;
   }
   if (estado.fase !== "terminado") {
@@ -535,45 +623,100 @@ async function consultarEstadoProcesarNotasGd() {
 
   clearInterval(intervaloProcesarNotasGd);
   intervaloProcesarNotasGd = null;
-  botonCerrarProcesarNotasGd.classList.add("oculto");
+  cargandoNotasGd.classList.add("oculto");
+  botonCancelarTiposNotasGd.classList.add("oculto");
+  botonBuscarTiposNotasGd.disabled = false;
 
   if (estado.resultado === "sin_credenciales" || estado.resultado === "credenciales") {
-    // El portal rechazó las credenciales guardadas (o ya no había): se
-    // refleja arriba para que el docente vuelva a escribirlas.
-    sesionGestionActiva = false;
-    pintarPuntoSesion(puntoSesionGestion, false);
-    estadoSesionGestion.textContent = TEXTOS_GESTION[estado.resultado];
-    botonLoginGestion.textContent = "Iniciar sesión";
-  } else if (estado.resultado === "error") {
-    estadoProcesarNotasGd.textContent = "No se pudo abrir";
+    // Es aquí, al usar el portal de verdad, donde se descubre que los datos
+    // guardados no sirven: se marca en la fila de sesión para que el docente
+    // los vuelva a escribir.
+    marcarSesionGestion(false, TEXTOS_GESTION[estado.resultado]);
+    mensajeNotasGd.textContent = TEXTOS_ERROR_NOTAS_GD[estado.resultado];
+  } else if (estado.resultado === "ok") {
+    mensajeNotasGd.textContent = "";
+    await cargarTiposNotaGdGuardados();
+  } else {
+    mensajeNotasGd.textContent =
+      estado.error || "No se pudieron obtener los tipos de nota de Gestión Docente.";
   }
   actualizarBloqueoProcesarNotasGd();
 }
 
-async function abrirProcesarNotasGd() {
-  botonProcesarNotasGd.disabled = true;
-  estadoProcesarNotasGd.textContent = "Entrando al portal...";
-  const respuesta = await fetch("/api/gestion-docente/procesar-notas/abrir", { method: "POST" });
-  if (!respuesta.ok) {
-    actualizarBloqueoProcesarNotasGd();
+async function buscarTiposNotaEnGestionDocente() {
+  const curso = cursoNotasGdSeleccionado();
+  if (!curso) {
+    mensajeNotasGd.textContent =
+      cursosObtenidos.length === 0
+        ? 'No hay cursos para elegir: usa "Obtener Cursos Activos" primero.'
+        : "Elige un curso primero.";
     return;
   }
+  if (!sesionGestionActiva) {
+    mensajeNotasGd.textContent =
+      'Falta tu usuario y contraseña de Gestión Docente: usa "Iniciar sesión" en la tarjeta de sesiones.';
+    return;
+  }
+
+  mensajeNotasGd.textContent = "";
+  registroNotasGd.textContent = "";
+  textoCargandoNotasGd.textContent = "Entrando a Gestión Docente...";
+  cargandoNotasGd.classList.remove("oculto");
+  botonBuscarTiposNotasGd.disabled = true;
+
+  const respuesta = await fetch("/api/gestion-docente/procesar-notas/tipos", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(curso),
+  });
+  if (!respuesta.ok) {
+    const error = await respuesta.json();
+    mensajeNotasGd.textContent = error.error || "No se pudo iniciar la búsqueda.";
+    cargandoNotasGd.classList.add("oculto");
+    botonBuscarTiposNotasGd.disabled = false;
+    return;
+  }
+
+  botonCancelarTiposNotasGd.classList.remove("oculto");
   clearInterval(intervaloProcesarNotasGd);
   intervaloProcesarNotasGd = setInterval(consultarEstadoProcesarNotasGd, 1000);
+  actualizarBloqueoProcesarNotasGd();
 }
 
-botonProcesarNotasGd.addEventListener("click", abrirProcesarNotasGd);
-botonCerrarProcesarNotasGd.addEventListener("click", async () => {
-  botonCerrarProcesarNotasGd.disabled = true;
-  await fetch("/api/gestion-docente/procesar-notas/cerrar", { method: "POST" });
-  botonCerrarProcesarNotasGd.disabled = false;
-});
+function abrirDialogoNotasGd() {
+  campoCursoNotasGd.innerHTML = "";
+  for (const curso of cursosObtenidos) {
+    const opcion = document.createElement("option");
+    opcion.value = curso.codigo;
+    opcion.textContent = curso.nombre;
+    campoCursoNotasGd.appendChild(opcion);
+  }
 
-// Se comprueba al abrir el panel, como pidió el docente: así se sabe de
-// entrada si las credenciales guardadas siguen sirviendo, en vez de
-// enterarse recién al usar una herramienta.
+  mensajeNotasGd.textContent = "";
+  registroNotasGd.textContent = "";
+  cargandoNotasGd.classList.add("oculto");
+  dialogoNotasGd.showModal();
+  cargarTiposNotaGdGuardados();
+}
+
+botonProcesarNotasGd.addEventListener("click", abrirDialogoNotasGd);
+// Cambiar de curso no entra al portal: solo muestra lo ya guardado.
+campoCursoNotasGd.addEventListener("change", () => {
+  mensajeNotasGd.textContent = "";
+  cargarTiposNotaGdGuardados();
+});
+botonBuscarTiposNotasGd.addEventListener("click", buscarTiposNotaEnGestionDocente);
+botonCancelarTiposNotasGd.addEventListener("click", async () => {
+  botonCancelarTiposNotasGd.disabled = true;
+  await fetch("/api/gestion-docente/procesar-notas/cerrar", { method: "POST" });
+  botonCancelarTiposNotasGd.disabled = false;
+});
+botonCerrarNotasGd.addEventListener("click", () => dialogoNotasGd.close());
+
+// Al abrir el panel solo se mira si hay credenciales guardadas; entrar al
+// portal a comprobarlas se hace recién cuando hace falta usarlo.
 actualizarBloqueoProcesarNotasGd();
-verificarSesionGestion();
+mirarCredencialesGestion();
 
 // --- Generar Anuncios Semanales ---
 // Por ahora, este asistente solo junta los datos y los guarda (ver
@@ -2905,7 +3048,9 @@ async function cargarNotasGuardadasDelCurso() {
       fechaTiposNotaActual = datos.obtenido_en;
       notasGuardadasActuales = datos.notas || {};
     } catch (error) {
-      mensajeNotas.textContent = "No se pudo leer lo guardado de este curso.";
+      // Si no hay nada guardado (o no se pudo leer), simplemente se queda
+      // la lista vacía, que ya invita a buscar los tipos: mostrar un aviso
+      // aquí solo sumaba ruido junto al resto de mensajes del diálogo.
     }
   }
 

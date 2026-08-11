@@ -58,11 +58,14 @@ from willaq.dictado.sesiones import (
     reiniciar_configuraciones as reiniciar_sesiones_dictado,
 )
 from willaq.notas.consultar import obtener_elementos_calificables, obtener_notas_de_elemento
+from willaq.notas.gestion_docente import obtener_tipos_nota as obtener_tipos_nota_gestion_docente
 from willaq.notas.guardado import (
     guardar_notas,
     guardar_tipos_nota,
+    guardar_tipos_nota_gd,
     obtener_notas_de_curso,
     obtener_tipos_nota,
+    obtener_tipos_nota_gd,
     reiniciar_configuraciones as reiniciar_notas,
 )
 from willaq.web.estado import (
@@ -129,16 +132,6 @@ def crear_app() -> Flask:
     def consultar_estado_login():
         return jsonify(estado_login.snapshot())
 
-    @app.post("/api/gestion-docente/verificar")
-    def verificar_sesion_gestion_docente():
-        if estado_login_gestion_docente.en_progreso:
-            return jsonify({"error": "Ya hay una operación en curso en Gestión Docente."}), 409
-
-        estado_login_gestion_docente.iniciar(fase="verificando")
-        hilo = threading.Thread(target=_verificar_gestion_docente_en_hilo, daemon=True)
-        hilo.start()
-        return jsonify({"ok": True})
-
     @app.get("/api/gestion-docente/credenciales")
     def consultar_credenciales_gestion_docente():
         """Dice si ya hay credenciales guardadas (nunca devuelve la contraseña)."""
@@ -178,15 +171,37 @@ def crear_app() -> Flask:
     def consultar_estado_gestion_docente():
         return jsonify(estado_login_gestion_docente.snapshot())
 
-    @app.post("/api/gestion-docente/procesar-notas/abrir")
-    def abrir_procesar_notas_gd():
+    @app.post("/api/gestion-docente/procesar-notas/tipos")
+    def buscar_tipos_notas_gd():
+        """Recorre el portal hasta la pantalla de notas del curso y lee sus tipos.
+
+        El recorrido incluye un paso manual (el token), así que corre en un
+        hilo aparte y el panel lo sigue por su estado, como el resto de
+        tareas que abren el navegador.
+        """
         if estado_procesar_notas_gd.en_progreso:
-            return jsonify({"error": "La pantalla de notas ya está abierta."}), 409
+            return jsonify({"error": "Ya hay una búsqueda de tipos en curso."}), 409
+
+        curso = request.get_json(silent=True) or {}
+        if not curso.get("codigo"):
+            return jsonify({"error": "Elige un curso primero."}), 400
 
         estado_procesar_notas_gd.iniciar()
-        hilo = threading.Thread(target=_procesar_notas_gd_en_hilo, daemon=True)
+        hilo = threading.Thread(
+            target=_buscar_tipos_notas_gd_en_hilo, args=(curso,), daemon=True
+        )
         hilo.start()
         return jsonify({"ok": True})
+
+    @app.get("/api/gestion-docente/procesar-notas/guardados/<codigo_curso>")
+    def tipos_notas_gd_guardados(codigo_curso):
+        guardado = obtener_tipos_nota_gd(codigo_curso) or {}
+        return jsonify(
+            {
+                "tipos": guardado.get("tipos", []),
+                "obtenido_en": guardado.get("obtenido_en"),
+            }
+        )
 
     @app.post("/api/gestion-docente/procesar-notas/cerrar")
     def cerrar_procesar_notas_gd():
@@ -443,31 +458,6 @@ def _ejecutar_login_en_hilo():
         estado_login.marcar_terminado("error", error=str(error))
 
 
-def _verificar_gestion_docente_en_hilo():
-    """Comprueba en segundo plano si se puede entrar a Gestión Docente.
-
-    Como este portal no conserva sesión (ver
-    willaq/autenticacion/gestion_docente.py), lo que se comprueba es que el
-    usuario y la contraseña guardados sigan sirviendo. Por ahora la
-    comprobación se ve en pantalla (MOSTRAR_NAVEGADOR_AL_PROBAR), mientras
-    terminamos de entender cómo se comporta el portal.
-    """
-
-    def notificar(mensaje):
-        estado_login_gestion_docente.agregar_log(mensaje)
-
-    try:
-        resultado = gestion_docente.verificar_sesion(notificar=notificar)
-        estado_login_gestion_docente.marcar_terminado(
-            resultado.get("estado"),
-            error=resultado.get("error"),
-            sesion_activa=resultado.get("estado") == "activa",
-        )
-    except Exception as error:
-        estado_login_gestion_docente.agregar_log(f"[ERROR] Ocurrió un problema inesperado: {error}")
-        estado_login_gestion_docente.marcar_terminado("error", error=str(error), sesion_activa=False)
-
-
 def _login_gestion_docente_en_hilo(usuario: str, clave: str):
     """Prueba el usuario y la contraseña de Gestión Docente y los guarda si sirven.
 
@@ -492,35 +482,41 @@ def _login_gestion_docente_en_hilo(usuario: str, clave: str):
         estado_login_gestion_docente.marcar_terminado("error", error=str(error), sesion_activa=False)
 
 
-def _procesar_notas_gd_en_hilo():
-    """Abre la pantalla de registro de notas de Gestión Docente en un hilo aparte.
+def _buscar_tipos_notas_gd_en_hilo(curso: dict):
+    """Busca en Gestión Docente los tipos de nota de un curso, en un hilo aparte.
 
-    La ventana queda abierta para que el docente trabaje en ella, así que
-    este hilo vive mientras dure eso; por eso corre aparte y no bloqueando
-    la petición HTTP.
+    El recorrido se detiene a la mitad esperando a que el docente escriba el
+    token en la ventana del navegador, así que puede durar varios minutos:
+    por eso corre aparte y no bloqueando la petición HTTP.
     """
 
     def notificar(mensaje):
         estado_procesar_notas_gd.agregar_log(mensaje)
 
-    def marcar_abierta():
-        estado_procesar_notas_gd.marcar_fase("esperando_cierre")
+    def marcar_esperando_token():
+        estado_procesar_notas_gd.marcar_fase("esperando_login_manual")
 
     def cancelado():
         return estado_procesar_notas_gd.evento_cierre.is_set()
 
     try:
-        resultado = gestion_docente.abrir_registro_de_notas(
+        resultado = obtener_tipos_nota_gestion_docente(
+            curso,
             notificar=notificar,
-            marcar_abierta=marcar_abierta,
             cancelado=cancelado,
+            marcar_esperando_token=marcar_esperando_token,
         )
+        estado = resultado.get("estado")
+        if estado == "ok":
+            guardar_tipos_nota_gd(curso.get("codigo"), resultado.get("tipos") or [])
         # Si el portal rechazó las credenciales guardadas, la fila de sesión
         # del panel tiene que enterarse: ya no hay con qué entrar.
-        if resultado in ("sin_credenciales", "credenciales"):
-            estado_login_gestion_docente.marcar_terminado(resultado, sesion_activa=False)
+        if estado in ("sin_credenciales", "credenciales"):
+            estado_login_gestion_docente.marcar_terminado(estado, sesion_activa=False)
         estado_procesar_notas_gd.marcar_terminado(
-            resultado, sesion_activa=resultado not in ("sin_credenciales", "credenciales")
+            estado,
+            error=resultado.get("error"),
+            sesion_activa=estado not in ("sin_credenciales", "credenciales"),
         )
     except Exception as error:
         estado_procesar_notas_gd.agregar_log(f"[ERROR] Ocurrió un problema inesperado: {error}")
