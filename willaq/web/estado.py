@@ -278,6 +278,9 @@ estado_generar_sesiones = EstadoTarea()
 estado_eliminar_sesiones = EstadoTarea()
 estado_elementos_notas = EstadoTarea()
 estado_notas = EstadoTarea()
+# Cargar un recurso (el Excel de un formulario) también abre el navegador y
+# puede tardar, así que corre como tarea de fondo igual que las demás.
+estado_recurso_notas = EstadoTarea()
 estado_login_gestion_docente = EstadoLoginGestionDocente()
 # Misma clase, otra instancia: "Procesar Notas Gestión Docente" también abre
 # una ventana y la mantiene hasta que el docente la cierra, así que necesita

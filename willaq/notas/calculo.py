@@ -169,7 +169,11 @@ def calcular_notas(alumnos_gd: list, notas_por_elemento: dict, elementos: list, 
         valores = [v for v in detalle.values() if v is not None]
 
         if not encontrado:
-            nota = None
+            # Al alumno que no aparece en Blackboard se le pone 0: no entregó
+            # nada, así que esa es su nota. Se deja el estado y la
+            # observación para que igual se vea de dónde salió ese 0 y se
+            # pueda corregir a mano si en realidad era un nombre mal escrito.
+            nota = 0
             estado = "sin_coincidencia"
         elif not valores:
             nota = None

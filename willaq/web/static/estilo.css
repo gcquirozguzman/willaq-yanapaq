@@ -1031,6 +1031,51 @@ html[data-tema="oscuro"] .logo-claro {
    aplastadas a unos 20px de alto, o sea invisibles. 'flex-shrink: 0' se lo
    impide y 'min-height' les garantiza un alto útil aunque el diálogo venga
    cargado. */
+/* Alta de un recurso de notas (por ahora, formularios). Va enmarcado para
+   que se distinga del resto del diálogo: aparece y desaparece, y conviene
+   que se vea como un bloque aparte y no como más campos sueltos. */
+.formulario-recurso {
+  border: 1px solid var(--borde, rgba(127, 127, 127, 0.35));
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.titulo-formulario-recurso {
+  margin: 0;
+  font-weight: 700;
+}
+
+.formulario-recurso .descripcion-dialogo {
+  margin: 0;
+}
+
+.formulario-recurso .botonera {
+  margin: 0;
+}
+
+/* Rejilla en vez de una fila: los campos se acomodan solos según el ancho
+   disponible en vez de estrujarse todos en la misma línea. */
+.campos-recurso {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+/* La URL es mucho más larga que el resto: se lleva una línea entera. */
+.campo-url-recurso {
+  grid-column: 1 / -1;
+}
+
+/* Aquí la etiqueta no necesita reservar dos líneas de alto: eso está para
+   alinear filas de campos, y en la rejilla cada celda se alinea sola. */
+.campos-recurso .etiqueta-campo {
+  min-height: 0;
+}
+
 .dialogo-contenido .tabla-scroll {
   flex-shrink: 0;
   min-height: 200px;

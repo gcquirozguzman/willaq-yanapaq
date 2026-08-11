@@ -3330,11 +3330,27 @@ const cuerpoTablaNotas = document.getElementById("cuerpo-tabla-notas");
 const botonBuscarTiposNotas = document.getElementById("boton-buscar-tipos-notas");
 const botonCerrarNotas = document.getElementById("boton-cerrar-notas");
 
+const botonAgregarRecurso = document.getElementById("boton-agregar-recurso");
+const formularioRecurso = document.getElementById("formulario-recurso");
+const tituloFormularioRecurso = document.getElementById("titulo-formulario-recurso");
+const campoTipoRecurso = document.getElementById("campo-tipo-recurso");
+const campoNombreRecurso = document.getElementById("campo-nombre-recurso");
+const campoUrlRecurso = document.getElementById("campo-url-recurso");
+const campoColumnaRecurso = document.getElementById("campo-columna-recurso");
+const botonCargarRecurso = document.getElementById("boton-cargar-recurso");
+const botonCancelarRecurso = document.getElementById("boton-cancelar-recurso");
+
 // Lo guardado del curso que está a la vista: sus tipos de nota, y las
 // notas ya descargadas de cada tipo ({nombre: {alumnos, sobre, obtenido_en}}).
 let tiposNotaActuales = [];
 let fechaTiposNotaActual = null;
 let notasGuardadasActuales = {};
+// Las notas que no vienen de Blackboard (formularios). Van en la misma
+// lista que los tipos, pero se manejan distinto: se cargan desde su URL.
+let recursosNotaActuales = [];
+// Cuando se está editando un recurso ya cargado, su nombre original: hace
+// falta para reemplazarlo aunque le cambien el nombre.
+let recursoEnEdicion = null;
 
 function fechaLegibleNotas(iso) {
   if (!iso) {
@@ -3412,22 +3428,70 @@ function crearFilaTipoNota(elemento) {
   return item;
 }
 
+// Un recurso se ve como un tipo más, pero sus botones son otros: no hay
+// nada que "obtener" de Blackboard, se vuelve a leer su Excel. Por eso
+// "Actualizar" reabre el formulario con sus datos en vez de descargar.
+function crearFilaRecursoNota(recurso) {
+  const guardado = notasGuardadasActuales[recurso.nombre];
+
+  const item = document.createElement("li");
+  item.className = "item-tipo-nota";
+
+  const datos = document.createElement("div");
+  const nombre = document.createElement("p");
+  nombre.className = "nombre-tipo-nota";
+  nombre.textContent = `${recurso.nombre} (Formulario)`;
+
+  const detalle = document.createElement("p");
+  detalle.className = "detalle-tipo-nota";
+  detalle.textContent = guardado
+    ? `${(guardado.alumnos || []).length} alumno(s) desde la columna ${recurso.columna}, leídas el ${fechaLegibleNotas(guardado.obtenido_en)}`
+    : `Columna ${recurso.columna}; todavía no se leen sus notas`;
+  datos.append(nombre, detalle);
+
+  const botonActualizar = document.createElement("button");
+  botonActualizar.type = "button";
+  botonActualizar.className = "boton-pequeno";
+  botonActualizar.textContent = "Actualizar";
+  botonActualizar.addEventListener("click", () => abrirFormularioRecurso(recurso));
+
+  const botonVer = document.createElement("button");
+  botonVer.type = "button";
+  botonVer.className = "boton-pequeno";
+  botonVer.textContent = "Ver";
+  botonVer.disabled = !guardado;
+  botonVer.addEventListener("click", () => verNotasDeTipo(recurso.nombre));
+
+  const botonQuitar = document.createElement("button");
+  botonQuitar.type = "button";
+  botonQuitar.className = "boton-pequeno";
+  botonQuitar.textContent = "Quitar";
+  botonQuitar.addEventListener("click", () => quitarRecursoNota(recurso.nombre));
+
+  item.append(datos, botonActualizar, botonVer, botonQuitar);
+  return item;
+}
+
 function renderizarTiposNota() {
   fechaTiposNotas.textContent = fechaTiposNotaActual
     ? `Tipos de nota obtenidos el ${fechaLegibleNotas(fechaTiposNotaActual)}`
     : "";
 
   listaTiposNotas.innerHTML = "";
-  if (tiposNotaActuales.length === 0) {
+  if (tiposNotaActuales.length === 0 && recursosNotaActuales.length === 0) {
     const item = document.createElement("li");
     item.className = "mensaje-cursos";
-    item.textContent = 'Todavía no hay tipos de nota. Pulsa "Buscar tipos de nota".';
+    item.textContent =
+      'Todavía no hay tipos de nota. Pulsa "Buscar tipos de nota" o "Agregar recurso".';
     listaTiposNotas.appendChild(item);
     return;
   }
 
   for (const elemento of tiposNotaActuales) {
     listaTiposNotas.appendChild(crearFilaTipoNota(elemento));
+  }
+  for (const recurso of recursosNotaActuales) {
+    listaTiposNotas.appendChild(crearFilaRecursoNota(recurso));
   }
 }
 
@@ -3450,6 +3514,7 @@ async function cargarNotasGuardadasDelCurso() {
   tiposNotaActuales = [];
   fechaTiposNotaActual = null;
   notasGuardadasActuales = {};
+  recursosNotaActuales = [];
   limpiarResultadoNotas();
 
   if (curso) {
@@ -3459,6 +3524,7 @@ async function cargarNotasGuardadasDelCurso() {
       tiposNotaActuales = datos.elementos || [];
       fechaTiposNotaActual = datos.obtenido_en;
       notasGuardadasActuales = datos.notas || {};
+      recursosNotaActuales = datos.recursos || [];
     } catch (error) {
       // Si no hay nada guardado (o no se pudo leer), simplemente se queda
       // la lista vacía, que ya invita a buscar los tipos: mostrar un aviso
@@ -3511,6 +3577,118 @@ async function buscarTiposNotaEnBlackboard() {
     bloquearBotonesTiposNota(false);
   }
 }
+
+// --- Recursos: notas que no vienen de Blackboard ---
+// Por ahora solo formularios: el docente escribe el nombre, la URL del
+// Excel con los resultados y en qué columna están las notas (eso último no
+// se puede adivinar, porque solo él sabe cuál de las preguntas es la
+// calificada). Al cargarlo pasa a ser un tipo más de la lista.
+
+function llenarColumnasRecurso() {
+  if (campoColumnaRecurso.options.length) {
+    return;
+  }
+  for (let i = 0; i < 26; i++) {
+    const letra = String.fromCharCode(65 + i);
+    const opcion = document.createElement("option");
+    opcion.value = letra;
+    opcion.textContent = letra;
+    campoColumnaRecurso.appendChild(opcion);
+  }
+}
+
+function abrirFormularioRecurso(recurso) {
+  llenarColumnasRecurso();
+  recursoEnEdicion = recurso ? recurso.nombre : null;
+
+  tituloFormularioRecurso.textContent = recurso
+    ? `Actualizar "${recurso.nombre}"`
+    : "Nuevo recurso de notas";
+  campoTipoRecurso.value = (recurso && recurso.tipo) || "formulario";
+  campoNombreRecurso.value = (recurso && recurso.nombre) || "";
+  campoUrlRecurso.value = (recurso && recurso.url) || "";
+  campoColumnaRecurso.value = (recurso && recurso.columna) || "A";
+
+  mensajeNotas.textContent = "";
+  formularioRecurso.classList.remove("oculto");
+  campoNombreRecurso.focus();
+}
+
+function cerrarFormularioRecurso() {
+  formularioRecurso.classList.add("oculto");
+  recursoEnEdicion = null;
+}
+
+async function cargarRecursoNota() {
+  const curso = cursoNotasSeleccionado();
+  const nombre = campoNombreRecurso.value.trim();
+  const url = campoUrlRecurso.value.trim();
+
+  if (!curso) {
+    mensajeNotas.textContent = "Elige un curso primero.";
+    return;
+  }
+  if (!nombre || !url) {
+    mensajeNotas.textContent = "Escribe el nombre y la URL del recurso.";
+    return;
+  }
+
+  // Si le cambiaron el nombre a un recurso que ya existía, se quita el
+  // viejo: si no, quedarían dos filas para la misma nota.
+  if (recursoEnEdicion && recursoEnEdicion !== nombre) {
+    await fetch("/api/notas/recursos/eliminar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ codigo_curso: curso.codigo, nombre: recursoEnEdicion }),
+    });
+  }
+
+  mensajeNotas.textContent = "";
+  textoCargandoNotas.textContent = "Abriendo el Excel del formulario con tu sesión...";
+  bloquearBotonesTiposNota(true);
+  botonCargarRecurso.disabled = true;
+
+  try {
+    const resultado = await ejecutarTareaDeFondo(
+      "/api/notas/recursos/cargar",
+      "/api/notas/recursos/estado",
+      {
+        codigo_curso: curso.codigo,
+        nombre,
+        tipo: campoTipoRecurso.value,
+        url,
+        columna: campoColumnaRecurso.value,
+      },
+      cargandoNotas,
+      null
+    );
+    cerrarFormularioRecurso();
+    mensajeNotas.textContent = `Se leyeron ${resultado.alumnos} alumno(s) de "${resultado.nombre}".`;
+    await cargarNotasGuardadasDelCurso();
+  } catch (error) {
+    mensajeNotas.textContent = error.message;
+  } finally {
+    botonCargarRecurso.disabled = false;
+    bloquearBotonesTiposNota(false);
+  }
+}
+
+async function quitarRecursoNota(nombre) {
+  const curso = cursoNotasSeleccionado();
+  if (!curso) {
+    return;
+  }
+  await fetch("/api/notas/recursos/eliminar", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ codigo_curso: curso.codigo, nombre }),
+  });
+  await cargarNotasGuardadasDelCurso();
+}
+
+botonAgregarRecurso.addEventListener("click", () => abrirFormularioRecurso(null));
+botonCargarRecurso.addEventListener("click", cargarRecursoNota);
+botonCancelarRecurso.addEventListener("click", cerrarFormularioRecurso);
 
 async function obtenerNotasDeTipo(nombreElemento) {
   const curso = cursoNotasSeleccionado();

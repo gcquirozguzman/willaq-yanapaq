@@ -36,6 +36,14 @@ RUTA_TIPOS_NOTA_GD = DIR_DATOS / "tipos_nota_gestion_docente.json"
 # el modal de "Procesar" y no se puede deducir solo, así que se guarda.
 RUTA_CALCULOS_GD = DIR_DATOS / "calculos_notas_gestion_docente.json"
 
+# Notas que no vienen de Blackboard sino de otra parte: por ahora, los
+# formularios cuyos resultados el docente lleva en un Excel. Se guardan
+# aparte de los tipos de Blackboard porque no se descubren solos —los
+# escribe el docente, con su URL y su columna— pero después se comportan
+# igual: aparecen en la misma lista y sus notas van al mismo archivo, así
+# que se pueden usar para armar una nota de Gestión Docente.
+RUTA_RECURSOS_NOTA = DIR_DATOS / "recursos_nota.json"
+
 
 def _cargar(ruta) -> dict:
     try:
@@ -69,6 +77,35 @@ def guardar_tipos_nota(curso_codigo: str, elementos: list):
 def obtener_tipos_nota(curso_codigo: str):
     """Devuelve {"elementos": [...], "obtenido_en": "..."} de un curso, o None."""
     return _cargar(RUTA_TIPOS_NOTA).get(curso_codigo)
+
+
+def guardar_recurso_nota(curso_codigo: str, recurso: dict):
+    """Guarda (o actualiza) un recurso de notas del curso, por su nombre."""
+    if not curso_codigo or not recurso.get("nombre"):
+        return
+    todos = _cargar(RUTA_RECURSOS_NOTA)
+    del_curso = [r for r in (todos.get(curso_codigo) or []) if r.get("nombre") != recurso["nombre"]]
+    del_curso.append({**recurso, "guardado_en": _ahora()})
+    todos[curso_codigo] = del_curso
+    _guardar(RUTA_RECURSOS_NOTA, todos)
+
+
+def obtener_recursos_nota(curso_codigo: str) -> list:
+    """Los recursos de notas configurados para un curso."""
+    return _cargar(RUTA_RECURSOS_NOTA).get(curso_codigo) or []
+
+
+def olvidar_recurso_nota(curso_codigo: str, nombre: str):
+    """Quita un recurso y las notas que había traído."""
+    todos = _cargar(RUTA_RECURSOS_NOTA)
+    todos[curso_codigo] = [r for r in (todos.get(curso_codigo) or []) if r.get("nombre") != nombre]
+    _guardar(RUTA_RECURSOS_NOTA, todos)
+
+    notas = _cargar(RUTA_NOTAS)
+    del_curso = notas.get(curso_codigo) or {}
+    if del_curso.pop(nombre, None) is not None:
+        notas[curso_codigo] = del_curso
+        _guardar(RUTA_NOTAS, notas)
 
 
 def guardar_datos_gd(curso_codigo: str, tipos: list, alumnos: list):
@@ -151,3 +188,4 @@ def reiniciar_configuraciones():
     _guardar(RUTA_NOTAS, {})
     _guardar(RUTA_TIPOS_NOTA_GD, {})
     _guardar(RUTA_CALCULOS_GD, {})
+    _guardar(RUTA_RECURSOS_NOTA, {})

@@ -65,13 +65,17 @@ from willaq.notas.guardado import (
     guardar_calculo_gd,
     guardar_datos_gd,
     guardar_notas,
+    guardar_recurso_nota,
     guardar_tipos_nota,
     obtener_calculos_gd,
     obtener_datos_gd,
     obtener_notas_de_curso,
+    obtener_recursos_nota,
     obtener_tipos_nota,
+    olvidar_recurso_nota,
     reiniciar_configuraciones as reiniciar_notas,
 )
+from willaq.notas.recursos import cargar_formulario
 from willaq.web.estado import (
     estado_cursos,
     estado_eliminar_sesiones,
@@ -82,6 +86,7 @@ from willaq.web.estado import (
     estado_login_gestion_docente,
     estado_notas,
     estado_procesar_notas_gd,
+    estado_recurso_notas,
 )
 
 
@@ -495,8 +500,53 @@ def crear_app() -> Flask:
                 "elementos": guardado.get("elementos") or [],
                 "obtenido_en": guardado.get("obtenido_en"),
                 "notas": obtener_notas_de_curso(codigo_curso),
+                # Los recursos (formularios) van en la misma lista que los
+                # elementos de Blackboard: para el docente son otra nota más.
+                "recursos": obtener_recursos_nota(codigo_curso),
             }
         )
+
+    @app.post("/api/notas/recursos/cargar")
+    def cargar_recurso_nota():
+        """Lee las notas de un recurso (por ahora, el Excel de un formulario).
+
+        Abre el navegador con la sesión de Blackboard, porque ese Excel vive
+        en la nube de la institución y solo se deja abrir estando dentro.
+        """
+        if estado_recurso_notas.en_progreso:
+            return jsonify({"error": "Ya se está cargando un recurso."}), 409
+
+        datos = request.get_json(silent=True) or {}
+        codigo_curso = datos.get("codigo_curso")
+        nombre = (datos.get("nombre") or "").strip()
+        url = (datos.get("url") or "").strip()
+        columna = (datos.get("columna") or "").strip()
+
+        if not codigo_curso or not nombre or not url:
+            return jsonify({"error": "Falta el curso, el nombre o la URL."}), 400
+        if not columna:
+            return jsonify({"error": "Indica en qué columna están las notas."}), 400
+
+        estado_recurso_notas.iniciar()
+        hilo = threading.Thread(
+            target=_cargar_recurso_en_hilo,
+            args=(codigo_curso, nombre, datos.get("tipo") or "formulario", url, columna),
+            daemon=True,
+        )
+        hilo.start()
+        return jsonify({"ok": True})
+
+    @app.get("/api/notas/recursos/estado")
+    def consultar_estado_recurso_nota():
+        return jsonify(estado_recurso_notas.snapshot())
+
+    @app.post("/api/notas/recursos/eliminar")
+    def eliminar_recurso_nota():
+        datos = request.get_json(silent=True) or {}
+        if not datos.get("codigo_curso") or not datos.get("nombre"):
+            return jsonify({"error": "Falta el curso o el nombre del recurso."}), 400
+        olvidar_recurso_nota(datos["codigo_curso"], datos["nombre"])
+        return jsonify({"ok": True})
 
     return app
 
@@ -610,6 +660,40 @@ def _obtener_datos_gd_en_hilo(curso: dict):
         estado_procesar_notas_gd.marcar_terminado("error", error=str(error))
     finally:
         estado_procesar_notas_gd.evento_cierre.clear()
+
+
+def _cargar_recurso_en_hilo(codigo_curso: str, nombre: str, tipo: str, url: str, columna: str):
+    """Lee el recurso y deja sus notas guardadas como las de Blackboard.
+
+    Corre aparte porque abre el navegador con la sesión del docente, y eso
+    puede tardar (y a veces pedirle algo en pantalla).
+    """
+
+    def notificar(mensaje):
+        estado_recurso_notas.agregar_log(mensaje)
+
+    try:
+        resultado = cargar_formulario(url, columna, notificar=notificar)
+        if resultado.get("estado") != "ok":
+            estado_recurso_notas.marcar_terminado(error=resultado.get("error"))
+            return
+
+        alumnos = resultado.get("alumnos") or []
+        # Se guardan igual que las de Blackboard, en el mismo archivo: de ahí
+        # en adelante esta nota se usa como cualquier otra (verla, y armar
+        # con ella una nota de Gestión Docente).
+        guardar_notas(codigo_curso, nombre, {"alumnos": alumnos, "sobre": None})
+        guardar_recurso_nota(
+            codigo_curso,
+            {"nombre": nombre, "tipo": tipo, "url": url, "columna": columna.upper()},
+        )
+        notificar(f"[OK] {len(alumnos)} alumno(s) leídos del formulario.")
+        estado_recurso_notas.marcar_terminado(
+            {"nombre": nombre, "alumnos": len(alumnos), "columna_nombres": resultado.get("columna_nombres")}
+        )
+    except Exception as error:
+        estado_recurso_notas.agregar_log(f"[ERROR] Ocurrió un problema inesperado: {error}")
+        estado_recurso_notas.marcar_terminado(error=str(error))
 
 
 def _escribir_notas_gd_en_hilo(curso: dict, tipo_gd: str, notas: dict):

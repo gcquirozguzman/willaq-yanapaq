@@ -157,7 +157,7 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6a1 1 0 0 1 1 1v1H8V4a1 1 0 0 1 1-1z"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/><path d="M8 12l2 2 4-4"/><path d="M8 17h8"/></svg>
             </div>
             <div>
-              <p class="nombre-herramienta">Obtener Notas Blackboard</p>
+              <p class="nombre-herramienta">Obtener Notas Blackboard y Otros</p>
               <p class="estado-herramienta" id="estado-notas">Obtén tus cursos primero</p>
             </div>
             <button id="boton-obtener-notas" class="boton-pequeno" type="button" disabled>Obtener</button>
@@ -648,10 +648,11 @@
       <p class="descripcion-dialogo">
         Elige el curso y pulsa <strong>Buscar tipos de nota</strong>. Luego, en cada tipo,
         <strong>Obtener</strong> descarga de Blackboard las notas de <strong>todos</strong> los
-        alumnos y <strong>Ver</strong> las muestra aquí abajo. Lo descargado queda guardado: la
-        próxima vez sale al instante y solo vuelve a consultarse cuando tú lo pidas. Esta
-        herramienta solo lee: no cambia ninguna nota. No se listan los cuestionarios ni los
-        minicuestionarios.
+        alumnos y <strong>Ver</strong> las muestra aquí abajo. Con <strong>Agregar recurso</strong>
+        puedes sumar notas que no están en Blackboard, como las de un formulario cuyos resultados
+        llevas en un Excel. Lo descargado queda guardado: la próxima vez sale al instante y solo
+        vuelve a consultarse cuando tú lo pidas. Esta herramienta solo lee: no cambia ninguna
+        nota. No se listan los cuestionarios ni los minicuestionarios.
       </p>
 
       <div class="fila-campos fila-campos-alineada-abajo">
@@ -662,6 +663,49 @@
         <button type="button" id="boton-buscar-tipos-notas" class="boton boton-secundario">
           Buscar tipos de nota
         </button>
+        <button type="button" id="boton-agregar-recurso" class="boton boton-secundario">
+          Agregar recurso
+        </button>
+      </div>
+
+      <!-- Formulario para dar de alta una nota que no viene de Blackboard.
+           Aparece solo cuando se pulsa "Agregar recurso" (o "Actualizar" en
+           un recurso ya cargado, que lo reabre con sus datos). -->
+      <div id="formulario-recurso" class="formulario-recurso oculto">
+        <p id="titulo-formulario-recurso" class="titulo-formulario-recurso">Nuevo recurso de notas</p>
+
+        <!-- En rejilla y no en una sola fila: con la URL de por medio los
+             campos quedaban demasiado apretados para leerlos. -->
+        <div class="campos-recurso">
+          <label class="campo">
+            <span class="etiqueta-campo">Tipo</span>
+            <select id="campo-tipo-recurso">
+              <option value="formulario">Formulario</option>
+            </select>
+          </label>
+          <label class="campo">
+            <span class="etiqueta-campo">Nombre</span>
+            <input type="text" id="campo-nombre-recurso" placeholder="Ej. PC1 - Formulario">
+          </label>
+          <label class="campo">
+            <span class="etiqueta-campo">Columna de las notas</span>
+            <select id="campo-columna-recurso"></select>
+          </label>
+          <label class="campo campo-url-recurso">
+            <span class="etiqueta-campo">URL del Excel</span>
+            <input type="text" id="campo-url-recurso" placeholder="https://...">
+          </label>
+        </div>
+
+        <p class="descripcion-dialogo">
+          El Excel se abre con tu sesión de Blackboard, así que no hace falta que sea público.
+          La columna de nombres se reconoce sola por su encabezado.
+        </p>
+
+        <div class="botonera">
+          <button type="button" id="boton-cargar-recurso" class="boton boton-primario">Cargar</button>
+          <button type="button" id="boton-cancelar-recurso" class="boton boton-secundario">Cancelar</button>
+        </div>
       </div>
 
       <p id="fecha-tipos-notas" class="fecha-obtencion-cursos"></p>
