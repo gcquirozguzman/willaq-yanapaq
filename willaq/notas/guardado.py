@@ -31,6 +31,11 @@ RUTA_NOTAS = DIR_DATOS / "notas_alumnos.json"
 # mano—, así que guardarlos evita repetir todo ese camino.
 RUTA_TIPOS_NOTA_GD = DIR_DATOS / "tipos_nota_gestion_docente.json"
 
+# Cómo se arma cada nota de Gestión Docente a partir de las de Blackboard:
+# qué exámenes entran y si se suman o se promedian. Lo decide el docente en
+# el modal de "Procesar" y no se puede deducir solo, así que se guarda.
+RUTA_CALCULOS_GD = DIR_DATOS / "calculos_notas_gestion_docente.json"
+
 
 def _cargar(ruta) -> dict:
     try:
@@ -66,18 +71,53 @@ def obtener_tipos_nota(curso_codigo: str):
     return _cargar(RUTA_TIPOS_NOTA).get(curso_codigo)
 
 
-def guardar_tipos_nota_gd(curso_codigo: str, tipos: list):
-    """Guarda los tipos de nota de Gestión Docente de un curso (T1, EF...)."""
+def guardar_datos_gd(curso_codigo: str, tipos: list, alumnos: list):
+    """Guarda lo que se trajo de Gestión Docente de un curso.
+
+    Son dos cosas de un mismo viaje: los tipos de nota (T1, EF...) y la
+    lista de alumnos tal como la nombra el portal. Los nombres importan
+    porque son con los que hay que cruzar las notas de Blackboard, que
+    escribe los nombres a su manera.
+    """
     if not curso_codigo:
         return
     todos = _cargar(RUTA_TIPOS_NOTA_GD)
-    todos[curso_codigo] = {"tipos": tipos or [], "obtenido_en": _ahora()}
+    todos[curso_codigo] = {
+        "tipos": tipos or [],
+        "alumnos": alumnos or [],
+        "obtenido_en": _ahora(),
+    }
     _guardar(RUTA_TIPOS_NOTA_GD, todos)
 
 
-def obtener_tipos_nota_gd(curso_codigo: str):
-    """Devuelve {"tipos": [...], "obtenido_en": "..."} de un curso, o None."""
+def obtener_datos_gd(curso_codigo: str):
+    """Devuelve {"tipos", "alumnos", "obtenido_en"} de un curso, o None."""
     return _cargar(RUTA_TIPOS_NOTA_GD).get(curso_codigo)
+
+
+def guardar_calculo_gd(curso_codigo: str, tipo_gd: str, configuracion: dict):
+    """Guarda cómo se arma la nota de un tipo de Gestión Docente.
+
+    Es la elección del docente en el modal de "Procesar": qué notas de
+    Blackboard entran y si se suman o se promedian. Se guarda para no tener
+    que volver a armarlo cada vez.
+    """
+    if not curso_codigo or not tipo_gd:
+        return
+    todos = _cargar(RUTA_CALCULOS_GD)
+    del_curso = todos.get(curso_codigo) or {}
+    del_curso[tipo_gd] = {
+        "elementos": configuracion.get("elementos") or [],
+        "operacion": configuracion.get("operacion") or "promedio",
+        "guardado_en": _ahora(),
+    }
+    todos[curso_codigo] = del_curso
+    _guardar(RUTA_CALCULOS_GD, todos)
+
+
+def obtener_calculos_gd(curso_codigo: str) -> dict:
+    """Devuelve {tipo_gd: {"elementos", "operacion", "guardado_en"}} del curso."""
+    return _cargar(RUTA_CALCULOS_GD).get(curso_codigo) or {}
 
 
 def guardar_notas(curso_codigo: str, elemento: str, resultado: dict):
@@ -110,3 +150,4 @@ def reiniciar_configuraciones():
     _guardar(RUTA_TIPOS_NOTA, {})
     _guardar(RUTA_NOTAS, {})
     _guardar(RUTA_TIPOS_NOTA_GD, {})
+    _guardar(RUTA_CALCULOS_GD, {})

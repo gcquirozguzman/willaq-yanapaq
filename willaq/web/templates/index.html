@@ -676,6 +676,9 @@
 
       <p id="resumen-notas" class="descripcion-dialogo oculto"></p>
 
+      <!-- Solo alumno y nota: es lo que se viene a ver. El resto (entregas,
+           estados, si la nota es automática) se resume arriba en una línea
+           en vez de meter cuatro columnas más. -->
       <div id="contenedor-tabla-notas" class="tabla-scroll oculto">
         <table class="tabla-anuncios">
           <thead>
@@ -683,8 +686,6 @@
               <th>#</th>
               <th>Alumno</th>
               <th>Nota</th>
-              <th>Entrega</th>
-              <th>Estado</th>
             </tr>
           </thead>
           <tbody id="cuerpo-tabla-notas"></tbody>
@@ -701,13 +702,14 @@
     <div class="dialogo-contenido">
       <h2>Procesar notas en Gestión Docente</h2>
       <p class="descripcion-dialogo">
-        Elige el curso y pulsa <strong>Buscar tipos de nota</strong>. Se abrirá una ventana que
-        entra sola a Gestión Docente, pasa por <strong>Académico</strong>, abre
+        Elige el curso y pulsa <strong>Obtener datos</strong>. Se abrirá una ventana que entra
+        sola a Gestión Docente, pasa por <strong>Académico</strong>, abre
         <strong>Registro de Notas</strong> y pulsa el <strong>Ingresar notas</strong> del curso.
         Ahí se detiene y te toca a ti: escribe el <strong>token</strong>, pulsa
-        <strong>Validar token</strong> y acepta el modal. En cuanto el portal habilite la lista,
-        se leen los tipos de nota y la ventana se cierra sola. Lo encontrado queda guardado, así
-        que no hay que repetir el token cada vez.
+        <strong>Validar token</strong> y acepta el modal. Después sigue solo: lee los tipos de
+        nota, elige uno para que cargue la lista, quita el check que la bloquea y se guarda
+        también la lista de alumnos del portal (es con esos nombres con los que se cruzan las
+        notas de Blackboard). Todo queda guardado, así que no hay que repetir el token cada vez.
       </p>
 
       <div class="fila-campos fila-campos-alineada-abajo">
@@ -716,12 +718,37 @@
           <select id="campo-curso-notas-gd" required></select>
         </label>
         <button type="button" id="boton-buscar-tipos-notas-gd" class="boton boton-secundario">
-          Buscar tipos de nota
+          Obtener datos
         </button>
       </div>
 
       <p id="fecha-tipos-notas-gd" class="fecha-obtencion-cursos"></p>
       <ul id="lista-tipos-notas-gd" class="lista-tipos-notas"></ul>
+
+      <div class="fila-campos fila-campos-alineada-abajo">
+        <button type="button" id="boton-ver-alumnos-gd" class="boton boton-secundario" disabled>
+          Ver alumnos obtenidos
+        </button>
+        <p id="resumen-alumnos-gd" class="fecha-obtencion-cursos"></p>
+      </div>
+
+      <!-- El portal guarda el nombre en tres columnas separadas, así que se
+           muestran las tres tal como vienen, además del nombre ya armado. -->
+      <div id="contenedor-tabla-alumnos-gd" class="tabla-scroll oculto">
+        <table class="tabla-anuncios">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Código</th>
+              <th>Nombres</th>
+              <th>Ap. materno</th>
+              <th>Ap. paterno</th>
+              <th>Nota actual</th>
+            </tr>
+          </thead>
+          <tbody id="cuerpo-tabla-alumnos-gd"></tbody>
+        </table>
+      </div>
 
       <p id="mensaje-notas-gd" class="mensaje-cursos"></p>
 
@@ -740,6 +767,53 @@
           Cancelar
         </button>
         <button type="button" id="boton-cerrar-notas-gd" class="boton boton-secundario">Cerrar</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="dialogo-procesar-tipo-gd" class="dialogo dialogo-ancho">
+    <div class="dialogo-contenido">
+      <h2 id="titulo-procesar-tipo-gd">Procesar nota</h2>
+      <p class="descripcion-dialogo">
+        Marca qué notas de Blackboard forman esta nota. Si eliges más de una, indica si se
+        <strong>suman</strong> o se <strong>promedian</strong>. Los alumnos se cruzan por nombre
+        entre los dos sistemas (sin importar tildes ni el orden de apellidos). Esto solo calcula
+        y te muestra el resultado para que lo revises: <strong>no registra nada</strong> en
+        Gestión Docente.
+      </p>
+
+      <ul id="lista-elementos-blackboard-gd" class="lista-tipos-notas"></ul>
+
+      <div id="fila-operacion-gd" class="fila-campos oculto">
+        <label class="campo">
+          <span class="etiqueta-campo">¿Cómo se calcula?</span>
+          <select id="campo-operacion-gd">
+            <option value="promedio">Promedio de las notas elegidas</option>
+            <option value="suma">Suma de las notas elegidas</option>
+          </select>
+        </label>
+      </div>
+
+      <p id="mensaje-procesar-tipo-gd" class="mensaje-cursos"></p>
+
+      <p id="resumen-procesar-tipo-gd" class="descripcion-dialogo oculto"></p>
+
+      <div id="contenedor-tabla-procesar-gd" class="tabla-scroll oculto">
+        <table class="tabla-anuncios">
+          <thead>
+            <tr id="encabezado-tabla-procesar-gd">
+              <th>#</th>
+              <th>Alumno</th>
+              <th>Nota final</th>
+            </tr>
+          </thead>
+          <tbody id="cuerpo-tabla-procesar-gd"></tbody>
+        </table>
+      </div>
+
+      <div class="botonera">
+        <button type="button" id="boton-calcular-procesar-gd" class="boton boton-primario">Calcular</button>
+        <button type="button" id="boton-cerrar-procesar-tipo-gd" class="boton boton-secundario">Cerrar</button>
       </div>
     </div>
   </dialog>

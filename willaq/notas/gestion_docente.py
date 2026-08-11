@@ -32,6 +32,7 @@ from willaq.autenticacion.gestion_docente import (
     _abrir_aplicativo_academico,
     _abrir_registro_de_notas_en_pagina,
     _entrar_al_portal,
+    _esperar_carga_de_pagina,
 )
 
 # El combo de tipos de nota, confirmado con el HTML real de la pantalla.
@@ -46,6 +47,31 @@ VALOR_OPCION_VACIA = "0"
 # lado, y quedarse corto significaría perder todo el recorrido anterior.
 SEGUNDOS_MAXIMOS_TOKEN = 900
 SEGUNDOS_ENTRE_SONDEOS_TOKEN = 1.0
+
+# Cuánto se espera después de cada acción que dispara un postback de
+# ASP.NET (elegir el tipo de nota, quitar el check). La página se recarga
+# entera, así que leerla antes de tiempo da la versión vieja.
+SEGUNDOS_TRAS_POSTBACK = 6
+SEGUNDOS_MAXIMOS_REFRESCO = 45
+
+# El check "Mostrar sólo alumnos HABILITADOS" viene marcado cada vez que se
+# elige un tipo de nota, y mientras siga así la lista está recortada: solo
+# muestra a los habilitados. Por eso hay que quitarlo SIEMPRE después de
+# elegir en el combo, no una sola vez.
+#
+# Dos detalles del HTML real que importan: es un checkbox de Bootstrap
+# (clase "custom-control-input"), así que el <input> está oculto y lo que se
+# ve es su <label>; y su onclick dispara un __doPostBack, o sea que la
+# página se recarga entera y hay que esperarla.
+SELECTOR_CHECK_SOLO_HABILITADOS = "#cphSite_chkSoloHab"
+
+# La tabla de alumnos de la pantalla de notas, confirmada con su HTML real.
+SELECTOR_TABLA_ALUMNOS = "#cphSite_gvNotas"
+
+# Cuántas lecturas seguidas iguales hacen falta para dar por terminado el
+# refresco de la tabla. Con una sola no alcanza: el postback puede estar a
+# medio camino y la tabla verse quieta por un instante.
+LECTURAS_IGUALES_PARA_DAR_POR_LISTO = 3
 
 # Busca en la tabla de Registro de Notas la fila del curso y le marca su
 # botón "Ingresar notas", para que después Playwright pueda pulsarlo por esa
@@ -120,6 +146,176 @@ JS_LEER_TIPOS = """
     valor: opcion.value,
     texto: (opcion.text || "").trim(),
   }));
+}
+"""
+
+# Mira cómo está el check de "sólo habilitados". Se busca primero por su id
+# conocido y, si el portal lo cambiara, se cae al primer checkbox marcado
+# que haya. Devuelve además la lista de checks de la pantalla, que queda en
+# el registro técnico por si alguna vez hay que ajustar el selector.
+JS_ESTADO_DEL_CHECK = """
+(selector) => {
+  const etiquetaDe = (c) => {
+    if (c.id) {
+      const etiqueta = document.querySelector('label[for="' + c.id + '"]');
+      if (etiqueta) return etiqueta.innerText.trim();
+    }
+    const contenedor = c.closest("label, td, th, div");
+    return contenedor ? (contenedor.innerText || "").trim().slice(0, 80) : "";
+  };
+
+  const checks = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+  const objetivo = document.querySelector(selector) || checks.find((c) => c.checked) || null;
+
+  return {
+    existe: !!objetivo,
+    marcado: objetivo ? objetivo.checked : false,
+    id: objetivo ? objetivo.id : "",
+    etiqueta: objetivo ? etiquetaDe(objetivo) : "",
+    todos: checks.map((c) => ({ id: c.id || "", marcado: c.checked, etiqueta: etiquetaDe(c) })).slice(0, 12),
+  };
+}
+"""
+
+# Destilda el check. Se hace con el .click() del propio elemento en vez de
+# un clic del ratón a propósito: el input está oculto por Bootstrap (lo
+# visible es su label), así que un clic por coordenadas no llega. Llamar a
+# .click() sí dispara su onclick, que es el que hace el __doPostBack.
+JS_QUITAR_CHECK = """
+(selector) => {
+  const objetivo = document.querySelector(selector);
+  if (!objetivo || !objetivo.checked) return false;
+  objetivo.click();
+  return true;
+}
+"""
+
+# Lee la lista de alumnos de la pantalla de notas (confirmado con el HTML
+# real de #cphSite_gvNotas).
+#
+# El nombre NO está en una sola columna: la tabla trae "Ap. paterno",
+# "Ap. materno" y "Nombres" por separado, así que se guardan las tres y el
+# nombre completo se arma como Nombres + Ap. materno + Ap. paterno. Ojo con
+# un detalle real de estos datos: en la mayoría de las filas "Ap. paterno"
+# viene vacío (&nbsp;) y "Ap. materno" trae los dos apellidos juntos, así
+# que las partes vacías simplemente se saltan.
+#
+# La versión anterior elegía "la celda con más letras" de cada fila y se
+# traía la carrera ("INGENIERÍA DE SISTEMAS INFORMÁ"), que es más larga que
+# el nombre. Ahora las columnas se ubican por su encabezado.
+JS_LEER_ALUMNOS = """
+(idTabla) => {
+  // innerText deja los &nbsp; como \\u00a0; si no se limpian, una celda
+  // "vacía" parecería tener contenido.
+  const texto = (c) => (c ? (c.innerText || "").replace(/\\u00a0/g, " ").trim() : "");
+  const limpiar = (t) => (t || "")
+    .normalize("NFKD")
+    .replace(/[\\u0300-\\u036f]/g, "")
+    .toLowerCase();
+  const letras = (t) => (t.match(/[A-Za-z]/g) || []).length;
+
+  const encabezadosDe = (tabla) => {
+    const primera = tabla.querySelector("tr");
+    return primera ? Array.from(primera.cells || []).map(texto) : [];
+  };
+  const buscarColumna = (encabezados, patron) => encabezados.findIndex((t) => patron.test(limpiar(t)));
+
+  const tablas = Array.from(document.querySelectorAll("table"));
+  if (!tablas.length) return { filas: [], tablas: 0, motivo: "sin_tablas" };
+
+  // Primero la tabla conocida; si el portal le cambiara el id, la que tenga
+  // encabezados de alumno; y como último recurso, la que más filas tenga.
+  let tabla =
+    document.querySelector(idTabla) ||
+    tablas.find(
+      (t) => t.querySelectorAll("tr").length > 2 &&
+             encabezadosDe(t).some((h) => /apellido|nombre|alumno/.test(limpiar(h)))
+    ) ||
+    tablas.reduce((a, b) => (b.querySelectorAll("tr").length > a.querySelectorAll("tr").length ? b : a));
+  if (!tabla || tabla.querySelectorAll("tr").length < 2) {
+    return { filas: [], tablas: tablas.length, motivo: "tabla_vacia" };
+  }
+
+  const encabezados = encabezadosDe(tabla);
+  const cuerpo = Array.from(tabla.querySelectorAll("tr")).filter(
+    (f) => (f.cells || []).length && f.querySelectorAll("td").length
+  );
+  if (!cuerpo.length) return { filas: [], tablas: tablas.length, motivo: "sin_filas" };
+
+  const iPaterno = buscarColumna(encabezados, /ap.*paterno/);
+  const iMaterno = buscarColumna(encabezados, /ap.*materno/);
+  const iNombres = buscarColumna(encabezados, /^nombres?$|nombres/);
+  const iCodigo = buscarColumna(encabezados, /codigo/);
+  const iCarrera = buscarColumna(encabezados, /carrera/);
+  const iNota = buscarColumna(encabezados, /nota/);
+
+  const valorEn = (fila, i) => (i >= 0 ? texto(fila.cells[i]) : "");
+
+  // Si no hay columnas de apellidos, se cae a la columna de texto con más
+  // valores distintos: los nombres casi no se repiten, la carrera sí.
+  let columnaSuelta = -1;
+  if (iNombres < 0 && iPaterno < 0 && iMaterno < 0) {
+    let mejor = -1;
+    const columnas = Math.max(...cuerpo.map((f) => f.cells.length));
+    for (let i = 0; i < columnas; i++) {
+      const valores = cuerpo.map((f) => valorEn(f, i)).filter((v) => letras(v) >= 5 && v.includes(" "));
+      if (valores.length < cuerpo.length * 0.8) continue;
+      const distintos = new Set(valores).size / valores.length;
+      if (distintos > mejor) {
+        mejor = distintos;
+        columnaSuelta = i;
+      }
+    }
+    if (columnaSuelta < 0) return { filas: [], tablas: tablas.length, motivo: "sin_columna" };
+  }
+
+  const filas = [];
+  for (const fila of cuerpo) {
+    const nombres = valorEn(fila, iNombres);
+    const materno = valorEn(fila, iMaterno);
+    const paterno = valorEn(fila, iPaterno);
+
+    const nombre =
+      columnaSuelta >= 0
+        ? valorEn(fila, columnaSuelta)
+        : [nombres, materno, paterno].filter((p) => p).join(" ");
+    if (letras(nombre) < 5) continue;
+
+    // La nota vive dentro de un <input>, así que innerText no la ve.
+    const campoNota = iNota >= 0 && fila.cells[iNota] ? fila.cells[iNota].querySelector("input") : null;
+
+    filas.push({
+      nombre: nombre,
+      nombres: nombres,
+      ap_materno: materno,
+      ap_paterno: paterno,
+      codigo: valorEn(fila, iCodigo),
+      carrera: valorEn(fila, iCarrera),
+      nota_actual: campoNota ? campoNota.value : valorEn(fila, iNota),
+      id_campo_nota: campoNota ? campoNota.id : "",
+    });
+  }
+
+  return {
+    filas: filas,
+    tablas: tablas.length,
+    id_tabla: tabla.id || "",
+    encabezados: encabezados,
+    columnas: { nombres: iNombres, materno: iMaterno, paterno: iPaterno, codigo: iCodigo, nota: iNota },
+  };
+}
+"""
+
+# Cuenta las filas de la tabla de alumnos y se queda con una "firma" de su
+# contenido. Sirve para saber si el portal ya refrescó la lista después de
+# quitar el check: si aparecen los alumnos no habilitados, esto cambia.
+JS_FIRMA_DE_LA_TABLA = """
+(idTabla) => {
+  const tabla = document.querySelector(idTabla);
+  if (!tabla) return "";
+  const filas = tabla.querySelectorAll("tbody tr");
+  const ultima = filas.length ? (filas[filas.length - 1].innerText || "").trim().slice(0, 60) : "";
+  return filas.length + "|" + ultima;
 }
 """
 
@@ -222,15 +418,160 @@ def _esperar_a_que_el_docente_valide_el_token(pagina, notificar, cancelado) -> l
     return []
 
 
-def obtener_tipos_nota(curso: dict, notificar=None, cancelado=None, marcar_esperando_token=None) -> dict:
-    """Recorre el portal hasta la pantalla de notas del curso y lee sus tipos.
+def elegir_tipo_y_preparar_lista(pagina, tipo, notificar) -> bool:
+    """Elige un tipo de nota en el combo y deja la lista de alumnos completa.
+
+    Son dos pasos que van siempre juntos: elegir en el combo dispara un
+    postback que carga la lista, y esa lista llega recortada porque el
+    portal vuelve a marcar "Mostrar sólo alumnos HABILITADOS" cada vez. Por
+    eso el check se quita después de CADA elección, no una sola vez.
+    """
+    marco = _marco_con_combo(pagina)
+    if marco is None:
+        notificar("[AVISO] No se encontró el combo de tipos de nota.")
+        return False
+
+    try:
+        notificar(f"Eligiendo \"{tipo['nombre']}\" para que cargue la lista de alumnos...")
+        marco.select_option(SELECTOR_COMBO_TIPOS, tipo["valor"])
+    except Exception as error:
+        notificar(f"[AVISO] No se pudo elegir un tipo de nota: {error}")
+        return False
+
+    _esperar_carga_de_pagina(pagina)
+    time.sleep(SEGUNDOS_TRAS_POSTBACK)
+
+    return _quitar_check_de_solo_habilitados(pagina, notificar)
+
+
+def _estado_del_check(pagina) -> dict:
+    """Cómo está ahora el check de "sólo habilitados"."""
+    marco = _marco_con_combo(pagina) or pagina
+    try:
+        return marco.evaluate(JS_ESTADO_DEL_CHECK, SELECTOR_CHECK_SOLO_HABILITADOS)
+    except Exception:
+        return {"existe": False, "marcado": False, "todos": []}
+
+
+def _quitar_check_de_solo_habilitados(pagina, notificar) -> bool:
+    """Destilda "Mostrar sólo alumnos HABILITADOS" y espera el refresco.
+
+    Hay que hacerlo cada vez que se elige un tipo de nota: el portal vuelve
+    a marcarlo, y mientras siga marcado la lista muestra solo a los alumnos
+    habilitados, o sea que faltarían alumnos.
+    """
+    estado = _estado_del_check(pagina)
+
+    for check in estado.get("todos", []):
+        notificar(f"     check: id={check['id'] or '-'} marcado={check['marcado']} · {check['etiqueta']}")
+
+    if not estado.get("existe"):
+        notificar("[AVISO] No se encontró el check de alumnos habilitados.")
+        return False
+    if not estado.get("marcado"):
+        notificar("     El check ya estaba quitado.")
+        return True
+
+    antes = _firma_de_la_tabla(pagina)
+    notificar(f"Quitando el check \"{estado.get('etiqueta')}\" (lista actual: {antes})...")
+
+    marco = _marco_con_combo(pagina) or pagina
+    try:
+        marco.evaluate(JS_QUITAR_CHECK, SELECTOR_CHECK_SOLO_HABILITADOS)
+    except Exception as error:
+        notificar(f"[AVISO] No se pudo quitar el check: {error}")
+        return False
+
+    _esperar_carga_de_pagina(pagina)
+    return _esperar_a_que_refresque_la_lista(pagina, antes, notificar)
+
+
+def _firma_de_la_tabla(pagina) -> str:
+    """Cuántas filas tiene la lista ahora mismo y cómo termina."""
+    marco = _marco_con_combo(pagina) or pagina
+    try:
+        return marco.evaluate(JS_FIRMA_DE_LA_TABLA, SELECTOR_TABLA_ALUMNOS) or ""
+    except Exception:
+        return ""
+
+
+def _esperar_a_que_refresque_la_lista(pagina, antes: str, notificar) -> bool:
+    """Espera a que la tabla de alumnos termine de recargarse.
+
+    Es el paso que faltaba. No sirve mirar el propio check: al hacer
+    .click() el navegador lo destilda en el acto, así que se ve "listo"
+    cuando el servidor todavía no contestó, y la lista que se leía era la
+    vieja (la recortada, sin los alumnos no habilitados).
+
+    Lo que sí sirve es mirar la tabla: se espera a que CAMBIE respecto a
+    como estaba y luego a que se quede quieta varias lecturas seguidas. Si
+    nunca cambia se sigue igual: puede ser que todos los alumnos ya
+    estuvieran habilitados y la lista sea de verdad la misma.
+    """
+    limite = time.time() + SEGUNDOS_MAXIMOS_REFRESCO
+    cambio = False
+    ultima = None
+    iguales = 0
+
+    while time.time() < limite:
+        time.sleep(SEGUNDOS_ENTRE_SONDEOS_TOKEN)
+        ahora = _firma_de_la_tabla(pagina)
+
+        if ahora and ahora != antes:
+            cambio = True
+        if cambio:
+            iguales = iguales + 1 if ahora == ultima else 0
+            if iguales >= LECTURAS_IGUALES_PARA_DAR_POR_LISTO:
+                notificar(f"[OK] La lista se refrescó: {antes} -> {ahora}")
+                return True
+        ultima = ahora
+
+    if cambio:
+        notificar(f"[AVISO] La lista siguió cambiando; se toma como está: {ultima}")
+        return True
+
+    notificar(f"[AVISO] La lista no cambió tras quitar el check (sigue en {antes}).")
+    notificar("        Puede que todos los alumnos ya estuvieran habilitados.")
+    return True
+
+
+def _leer_alumnos(pagina, notificar) -> list:
+    """Lee los nombres de los alumnos que quedaron listados en la pantalla."""
+    marco = _marco_con_combo(pagina) or pagina
+    try:
+        leido = marco.evaluate(JS_LEER_ALUMNOS, SELECTOR_TABLA_ALUMNOS)
+    except Exception as error:
+        notificar(f"[AVISO] No se pudo leer la lista de alumnos: {error}")
+        return []
+
+    filas = leido.get("filas") or []
+    if not filas:
+        notificar(f"[AVISO] No se encontró la lista de alumnos ({leido.get('motivo')}).")
+        return []
+
+    notificar(f"[OK] Se leyeron {len(filas)} alumno(s) de la tabla {leido.get('id_tabla') or 'sin id'}.")
+    notificar(f"     columnas: {', '.join(leido.get('encabezados') or [])}")
+    for fila in filas[:3]:
+        notificar(f"     ejemplo: {fila['codigo']} · {fila['nombre']}")
+    return filas
+
+
+def obtener_datos_del_curso(curso: dict, notificar=None, cancelado=None, marcar_esperando_token=None) -> dict:
+    """Recorre el portal y trae los tipos de nota y la lista de alumnos.
 
     'curso' es el curso tal como lo guarda el panel ({"codigo", "nombre",
     ...}). La ventana se abre a la vista siempre, sin excepción: el docente
     tiene que escribir el token ahí.
 
+    Después del token siguen dos pasos más: elegir un tipo cualquiera del
+    combo para que el portal cargue la lista de alumnos, y quitar el check
+    que la trae bloqueada. Los nombres que se leen ahí son con los que
+    después se cruzan las notas de Blackboard, así que se guardan junto con
+    los tipos.
+
     Devuelve {"estado": "ok"|"sin_credenciales"|"credenciales"|"error",
-    "tipos": [{"valor", "nombre"}], "error": "..."}.
+    "tipos": [{"valor", "nombre"}], "alumnos": [{"nombre", "celdas"}],
+    "error": "..."}.
     """
     notificar = notificar or print
     marcar_esperando_token = marcar_esperando_token or (lambda: None)
@@ -309,10 +650,20 @@ def obtener_tipos_nota(curso: dict, notificar=None, cancelado=None, marcar_esper
             notificar(f"[OK] Se encontraron {len(tipos)} tipo(s) de nota:")
             for tipo in tipos:
                 notificar(f"     - {tipo['nombre']}")
-            return {"estado": "ok", "tipos": tipos}
+
+            # Con los tipos ya no hace falta el docente: se elige uno
+            # cualquiera solo para que el portal muestre la lista de alumnos
+            # (son los mismos para todos los tipos).
+            alumnos = []
+            if elegir_tipo_y_preparar_lista(pagina, tipos[0], notificar):
+                alumnos = _leer_alumnos(pagina, notificar)
+            if not alumnos:
+                notificar("[AVISO] Se guardan los tipos, pero sin la lista de alumnos.")
+
+            return {"estado": "ok", "tipos": tipos, "alumnos": alumnos}
         except Exception as error:
             notificar(f"[ERROR] Ocurrió un problema en Gestión Docente: {error}")
-            return {"estado": "error", "tipos": [], "error": str(error)}
+            return {"estado": "error", "tipos": [], "alumnos": [], "error": str(error)}
         finally:
             try:
                 navegador.close()

@@ -57,15 +57,18 @@ from willaq.dictado.sesiones import (
     obtener_todas_las_configuraciones as obtener_todas_las_sesiones,
     reiniciar_configuraciones as reiniciar_sesiones_dictado,
 )
+from willaq.notas.calculo import calcular_notas
 from willaq.notas.consultar import obtener_elementos_calificables, obtener_notas_de_elemento
-from willaq.notas.gestion_docente import obtener_tipos_nota as obtener_tipos_nota_gestion_docente
+from willaq.notas.gestion_docente import obtener_datos_del_curso
 from willaq.notas.guardado import (
+    guardar_calculo_gd,
+    guardar_datos_gd,
     guardar_notas,
     guardar_tipos_nota,
-    guardar_tipos_nota_gd,
+    obtener_calculos_gd,
+    obtener_datos_gd,
     obtener_notas_de_curso,
     obtener_tipos_nota,
-    obtener_tipos_nota_gd,
     reiniciar_configuraciones as reiniciar_notas,
 )
 from willaq.web.estado import (
@@ -172,15 +175,15 @@ def crear_app() -> Flask:
         return jsonify(estado_login_gestion_docente.snapshot())
 
     @app.post("/api/gestion-docente/procesar-notas/tipos")
-    def buscar_tipos_notas_gd():
-        """Recorre el portal hasta la pantalla de notas del curso y lee sus tipos.
+    def obtener_datos_gd_web():
+        """Recorre el portal y trae los tipos de nota y la lista de alumnos.
 
         El recorrido incluye un paso manual (el token), así que corre en un
         hilo aparte y el panel lo sigue por su estado, como el resto de
         tareas que abren el navegador.
         """
         if estado_procesar_notas_gd.en_progreso:
-            return jsonify({"error": "Ya hay una búsqueda de tipos en curso."}), 409
+            return jsonify({"error": "Ya hay una búsqueda en curso."}), 409
 
         curso = request.get_json(silent=True) or {}
         if not curso.get("codigo"):
@@ -188,20 +191,52 @@ def crear_app() -> Flask:
 
         estado_procesar_notas_gd.iniciar()
         hilo = threading.Thread(
-            target=_buscar_tipos_notas_gd_en_hilo, args=(curso,), daemon=True
+            target=_obtener_datos_gd_en_hilo, args=(curso,), daemon=True
         )
         hilo.start()
         return jsonify({"ok": True})
 
     @app.get("/api/gestion-docente/procesar-notas/guardados/<codigo_curso>")
-    def tipos_notas_gd_guardados(codigo_curso):
-        guardado = obtener_tipos_nota_gd(codigo_curso) or {}
+    def datos_gd_guardados(codigo_curso):
+        guardado = obtener_datos_gd(codigo_curso) or {}
         return jsonify(
             {
                 "tipos": guardado.get("tipos", []),
+                "alumnos": guardado.get("alumnos", []),
                 "obtenido_en": guardado.get("obtenido_en"),
+                "calculos": obtener_calculos_gd(codigo_curso),
             }
         )
+
+    @app.post("/api/gestion-docente/procesar-notas/calcular")
+    def calcular_nota_gd():
+        """Cruza los alumnos del portal con las notas de Blackboard y calcula.
+
+        No escribe nada en ningún portal: devuelve el resultado para que el
+        docente pueda revisarlo antes. La elección (qué notas entran y si se
+        suman o promedian) se guarda para no rehacerla cada vez.
+        """
+        datos = request.get_json(silent=True) or {}
+        codigo_curso = datos.get("codigo_curso")
+        tipo_gd = datos.get("tipo_gd")
+        elementos = datos.get("elementos") or []
+        operacion = datos.get("operacion") or "promedio"
+
+        if not codigo_curso or not elementos:
+            return jsonify({"error": "Elige al menos una nota de Blackboard."}), 400
+
+        guardado = obtener_datos_gd(codigo_curso) or {}
+        alumnos = guardado.get("alumnos") or []
+        if not alumnos:
+            return jsonify(
+                {"error": 'Todavía no hay alumnos del portal: pulsa "Obtener datos" primero.'}
+            ), 400
+
+        resultado = calcular_notas(
+            alumnos, obtener_notas_de_curso(codigo_curso), elementos, operacion
+        )
+        guardar_calculo_gd(codigo_curso, tipo_gd, {"elementos": elementos, "operacion": operacion})
+        return jsonify(resultado)
 
     @app.post("/api/gestion-docente/procesar-notas/cerrar")
     def cerrar_procesar_notas_gd():
@@ -482,8 +517,8 @@ def _login_gestion_docente_en_hilo(usuario: str, clave: str):
         estado_login_gestion_docente.marcar_terminado("error", error=str(error), sesion_activa=False)
 
 
-def _buscar_tipos_notas_gd_en_hilo(curso: dict):
-    """Busca en Gestión Docente los tipos de nota de un curso, en un hilo aparte.
+def _obtener_datos_gd_en_hilo(curso: dict):
+    """Trae de Gestión Docente los tipos de nota y los alumnos, en un hilo aparte.
 
     El recorrido se detiene a la mitad esperando a que el docente escriba el
     token en la ventana del navegador, así que puede durar varios minutos:
@@ -500,7 +535,7 @@ def _buscar_tipos_notas_gd_en_hilo(curso: dict):
         return estado_procesar_notas_gd.evento_cierre.is_set()
 
     try:
-        resultado = obtener_tipos_nota_gestion_docente(
+        resultado = obtener_datos_del_curso(
             curso,
             notificar=notificar,
             cancelado=cancelado,
@@ -508,7 +543,11 @@ def _buscar_tipos_notas_gd_en_hilo(curso: dict):
         )
         estado = resultado.get("estado")
         if estado == "ok":
-            guardar_tipos_nota_gd(curso.get("codigo"), resultado.get("tipos") or [])
+            guardar_datos_gd(
+                curso.get("codigo"),
+                resultado.get("tipos") or [],
+                resultado.get("alumnos") or [],
+            )
         # Si el portal rechazó las credenciales guardadas, la fila de sesión
         # del panel tiene que enterarse: ya no hay con qué entrar.
         if estado in ("sin_credenciales", "credenciales"):

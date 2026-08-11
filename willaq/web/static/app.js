@@ -528,9 +528,15 @@ const textoCargandoNotasGd = document.getElementById("texto-cargando-notas-gd");
 const registroNotasGd = document.getElementById("registro-notas-gd");
 const botonCancelarTiposNotasGd = document.getElementById("boton-cancelar-tipos-notas-gd");
 const botonCerrarNotasGd = document.getElementById("boton-cerrar-notas-gd");
+const botonVerAlumnosGd = document.getElementById("boton-ver-alumnos-gd");
+const resumenAlumnosGd = document.getElementById("resumen-alumnos-gd");
+const contenedorTablaAlumnosGd = document.getElementById("contenedor-tabla-alumnos-gd");
+const cuerpoTablaAlumnosGd = document.getElementById("cuerpo-tabla-alumnos-gd");
 
 let intervaloProcesarNotasGd = null;
 let tiposNotaGdActuales = [];
+let alumnosGdActuales = [];
+let calculosGdGuardados = {};
 let fechaTiposNotaGdActual = null;
 
 // Esta herramienta no depende de nada más: se puede abrir siempre. Lo único
@@ -552,34 +558,88 @@ function cursoNotasGdSeleccionado() {
 
 function renderizarTiposNotaGd() {
   fechaTiposNotasGd.textContent = fechaTiposNotaGdActual
-    ? `Tipos de nota obtenidos el ${fechaLegibleNotas(fechaTiposNotaGdActual)}`
+    ? `Datos obtenidos el ${fechaLegibleNotas(fechaTiposNotaGdActual)}`
     : "";
 
   listaTiposNotasGd.innerHTML = "";
   if (tiposNotaGdActuales.length === 0) {
     const item = document.createElement("li");
     item.className = "mensaje-cursos";
-    item.textContent = 'Todavía no hay tipos de nota. Pulsa "Buscar tipos de nota".';
+    item.textContent = 'Todavía no hay tipos de nota. Pulsa "Obtener datos".';
     listaTiposNotasGd.appendChild(item);
-    return;
+  } else {
+    for (const tipo of tiposNotaGdActuales) {
+      listaTiposNotasGd.appendChild(crearFilaTipoNotaGd(tipo));
+    }
   }
 
-  for (const tipo of tiposNotaGdActuales) {
-    const item = document.createElement("li");
-    item.className = "item-tipo-nota";
-    const datos = document.createElement("div");
-    const nombre = document.createElement("p");
-    nombre.className = "nombre-tipo-nota";
-    nombre.textContent = tipo.nombre;
-    datos.appendChild(nombre);
-    item.appendChild(datos);
-    listaTiposNotasGd.appendChild(item);
-  }
+  // La lista de alumnos viene del mismo viaje que los tipos, así que se
+  // muestra junto a ellos.
+  botonVerAlumnosGd.disabled = alumnosGdActuales.length === 0;
+  resumenAlumnosGd.textContent = alumnosGdActuales.length
+    ? `${alumnosGdActuales.length} alumno(s) leídos del portal`
+    : "Todavía no hay alumnos del portal";
+  contenedorTablaAlumnosGd.classList.add("oculto");
+}
+
+function crearFilaTipoNotaGd(tipo) {
+  const guardado = calculosGdGuardados[tipo.nombre];
+
+  const item = document.createElement("li");
+  item.className = "item-tipo-nota";
+
+  const datos = document.createElement("div");
+  const nombre = document.createElement("p");
+  nombre.className = "nombre-tipo-nota";
+  nombre.textContent = tipo.nombre;
+
+  const detalle = document.createElement("p");
+  detalle.className = "detalle-tipo-nota";
+  detalle.textContent = guardado
+    ? `${guardado.operacion === "suma" ? "Suma" : "Promedio"} de: ${(guardado.elementos || []).join(", ")}`
+    : "Sin configurar";
+  datos.append(nombre, detalle);
+
+  const botonProcesar = document.createElement("button");
+  botonProcesar.type = "button";
+  botonProcesar.className = "boton-pequeno";
+  botonProcesar.textContent = "Procesar";
+  botonProcesar.addEventListener("click", () => abrirDialogoProcesarTipoGd(tipo));
+
+  item.append(datos, botonProcesar);
+  return item;
+}
+
+function verAlumnosGd() {
+  cuerpoTablaAlumnosGd.innerHTML = "";
+  alumnosGdActuales.forEach((alumno, indice) => {
+    const fila = document.createElement("tr");
+    const valores = [
+      indice + 1,
+      alumno.codigo || "",
+      alumno.nombres || alumno.nombre || alumno,
+      alumno.ap_materno || "",
+      alumno.ap_paterno || "",
+      alumno.nota_actual === undefined ? "" : alumno.nota_actual,
+    ];
+    for (const valor of valores) {
+      const celda = document.createElement("td");
+      celda.textContent = valor;
+      fila.appendChild(celda);
+    }
+    cuerpoTablaAlumnosGd.appendChild(fila);
+  });
+  contenedorTablaAlumnosGd.classList.toggle(
+    "oculto",
+    !contenedorTablaAlumnosGd.classList.contains("oculto")
+  );
 }
 
 async function cargarTiposNotaGdGuardados() {
   const curso = cursoNotasGdSeleccionado();
   tiposNotaGdActuales = [];
+  alumnosGdActuales = [];
+  calculosGdGuardados = {};
   fechaTiposNotaGdActual = null;
 
   if (curso) {
@@ -589,9 +649,11 @@ async function cargarTiposNotaGdGuardados() {
       );
       const datos = await respuesta.json();
       tiposNotaGdActuales = datos.tipos || [];
+      alumnosGdActuales = datos.alumnos || [];
+      calculosGdGuardados = datos.calculos || {};
       fechaTiposNotaGdActual = datos.obtenido_en;
     } catch (error) {
-      // Sin nada guardado, la lista queda vacía y ya invita a buscar.
+      // Sin nada guardado, la lista queda vacía y ya invita a obtener datos.
     }
   }
 
@@ -706,12 +768,194 @@ campoCursoNotasGd.addEventListener("change", () => {
   cargarTiposNotaGdGuardados();
 });
 botonBuscarTiposNotasGd.addEventListener("click", buscarTiposNotaEnGestionDocente);
+botonVerAlumnosGd.addEventListener("click", verAlumnosGd);
 botonCancelarTiposNotasGd.addEventListener("click", async () => {
   botonCancelarTiposNotasGd.disabled = true;
   await fetch("/api/gestion-docente/procesar-notas/cerrar", { method: "POST" });
   botonCancelarTiposNotasGd.disabled = false;
 });
 botonCerrarNotasGd.addEventListener("click", () => dialogoNotasGd.close());
+
+// --- Procesar un tipo de nota: de las notas de Blackboard a la casilla ---
+// Aquí se decide de qué se compone cada nota de Gestión Docente. No se
+// puede adivinar: que "T1" salga del promedio de dos trabajos de Blackboard
+// es una decisión del docente, así que se le pregunta y se guarda.
+// Importante: esto calcula y muestra, pero no registra nada en el portal.
+
+const dialogoProcesarTipoGd = document.getElementById("dialogo-procesar-tipo-gd");
+const tituloProcesarTipoGd = document.getElementById("titulo-procesar-tipo-gd");
+const listaElementosBlackboardGd = document.getElementById("lista-elementos-blackboard-gd");
+const filaOperacionGd = document.getElementById("fila-operacion-gd");
+const campoOperacionGd = document.getElementById("campo-operacion-gd");
+const mensajeProcesarTipoGd = document.getElementById("mensaje-procesar-tipo-gd");
+const resumenProcesarTipoGd = document.getElementById("resumen-procesar-tipo-gd");
+const encabezadoTablaProcesarGd = document.getElementById("encabezado-tabla-procesar-gd");
+const contenedorTablaProcesarGd = document.getElementById("contenedor-tabla-procesar-gd");
+const cuerpoTablaProcesarGd = document.getElementById("cuerpo-tabla-procesar-gd");
+const botonCalcularProcesarGd = document.getElementById("boton-calcular-procesar-gd");
+const botonCerrarProcesarTipoGd = document.getElementById("boton-cerrar-procesar-tipo-gd");
+
+let tipoGdEnProceso = null;
+
+function elementosBlackboardElegidos() {
+  return Array.from(
+    listaElementosBlackboardGd.querySelectorAll("input[type=checkbox]:checked")
+  ).map((casilla) => casilla.value);
+}
+
+// La pregunta de suma o promedio solo tiene sentido con más de una nota.
+function actualizarOperacionGd() {
+  filaOperacionGd.classList.toggle("oculto", elementosBlackboardElegidos().length < 2);
+}
+
+async function abrirDialogoProcesarTipoGd(tipo) {
+  const curso = cursoNotasGdSeleccionado();
+  if (!curso) {
+    return;
+  }
+
+  tipoGdEnProceso = tipo;
+  tituloProcesarTipoGd.textContent = `Procesar ${tipo.nombre}`;
+  mensajeProcesarTipoGd.textContent = "";
+  resumenProcesarTipoGd.classList.add("oculto");
+  contenedorTablaProcesarGd.classList.add("oculto");
+  cuerpoTablaProcesarGd.innerHTML = "";
+  listaElementosBlackboardGd.innerHTML = "";
+
+  // Las opciones son las notas ya descargadas de Blackboard para ese curso:
+  // no tiene sentido ofrecer un examen del que todavía no hay notas.
+  let notasBlackboard = {};
+  try {
+    const respuesta = await fetch(`/api/notas/guardadas/${encodeURIComponent(curso.codigo)}`);
+    const datos = await respuesta.json();
+    notasBlackboard = datos.notas || {};
+  } catch (error) {
+    notasBlackboard = {};
+  }
+
+  const nombres = Object.keys(notasBlackboard);
+  if (nombres.length === 0) {
+    const item = document.createElement("li");
+    item.className = "mensaje-cursos";
+    item.textContent =
+      'Todavía no hay notas descargadas de Blackboard para este curso: usa "Obtener Notas Blackboard" primero.';
+    listaElementosBlackboardGd.appendChild(item);
+  }
+
+  const guardado = calculosGdGuardados[tipo.nombre] || {};
+  for (const nombre of nombres) {
+    const item = document.createElement("li");
+    item.className = "item-tipo-nota";
+
+    const etiqueta = document.createElement("label");
+    etiqueta.className = "campo-casilla";
+    const casilla = document.createElement("input");
+    casilla.type = "checkbox";
+    casilla.value = nombre;
+    casilla.checked = (guardado.elementos || []).includes(nombre);
+    casilla.addEventListener("change", actualizarOperacionGd);
+
+    const texto = document.createElement("span");
+    const cuantos = (notasBlackboard[nombre].alumnos || []).length;
+    texto.textContent = `${nombre} (${cuantos} alumno(s))`;
+
+    etiqueta.append(casilla, texto);
+    item.appendChild(etiqueta);
+    listaElementosBlackboardGd.appendChild(item);
+  }
+
+  campoOperacionGd.value = guardado.operacion || "promedio";
+  actualizarOperacionGd();
+  dialogoProcesarTipoGd.showModal();
+}
+
+const TEXTOS_ESTADO_CALCULO = {
+  ok: "",
+  incompleto: "Le falta alguna de las notas elegidas",
+  sin_nota: "Sin ninguna nota puesta",
+  sin_coincidencia: "No se encontró en Blackboard",
+};
+
+function mostrarCalculoGd(resultado) {
+  const elementos = resultado.elementos || [];
+
+  encabezadoTablaProcesarGd.innerHTML = "";
+  for (const titulo of ["#", "Alumno", ...elementos, "Nota final", "Observación"]) {
+    const celda = document.createElement("th");
+    celda.textContent = titulo;
+    encabezadoTablaProcesarGd.appendChild(celda);
+  }
+
+  cuerpoTablaProcesarGd.innerHTML = "";
+  (resultado.filas || []).forEach((fila, indice) => {
+    const tr = document.createElement("tr");
+    const valores = [
+      indice + 1,
+      fila.nombre,
+      ...elementos.map((e) => (fila.detalle[e] === null ? "—" : fila.detalle[e])),
+      fila.nota === null ? "—" : fila.nota,
+      TEXTOS_ESTADO_CALCULO[fila.estado] || "",
+    ];
+    for (const valor of valores) {
+      const td = document.createElement("td");
+      td.textContent = valor;
+      tr.appendChild(td);
+    }
+    cuerpoTablaProcesarGd.appendChild(tr);
+  });
+
+  const conNota = (resultado.filas || []).filter((f) => f.nota !== null).length;
+  const total = (resultado.filas || []).length;
+  const sobran = (resultado.sin_encontrar || []).length;
+  resumenProcesarTipoGd.textContent =
+    `${conNota} de ${total} alumno(s) del portal quedaron con nota ` +
+    `(${resultado.operacion === "suma" ? "suma" : "promedio"} de ${elementos.join(", ")}).` +
+    (sobran
+      ? ` ${sobran} alumno(s) de Blackboard no están en el portal: ${resultado.sin_encontrar.join(", ")}.`
+      : "");
+  resumenProcesarTipoGd.classList.remove("oculto");
+  contenedorTablaProcesarGd.classList.remove("oculto");
+}
+
+async function calcularNotaTipoGd() {
+  const curso = cursoNotasGdSeleccionado();
+  const elementos = elementosBlackboardElegidos();
+  if (!curso || !tipoGdEnProceso) {
+    return;
+  }
+  if (elementos.length === 0) {
+    mensajeProcesarTipoGd.textContent = "Marca al menos una nota de Blackboard.";
+    return;
+  }
+
+  mensajeProcesarTipoGd.textContent = "";
+  botonCalcularProcesarGd.disabled = true;
+  try {
+    const respuesta = await fetch("/api/gestion-docente/procesar-notas/calcular", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        codigo_curso: curso.codigo,
+        tipo_gd: tipoGdEnProceso.nombre,
+        elementos,
+        operacion: elementos.length > 1 ? campoOperacionGd.value : "promedio",
+      }),
+    });
+    const datos = await respuesta.json();
+    if (!respuesta.ok) {
+      mensajeProcesarTipoGd.textContent = datos.error || "No se pudo calcular.";
+      return;
+    }
+    mostrarCalculoGd(datos);
+    // La elección quedó guardada en el servidor: se refleja en la lista.
+    await cargarTiposNotaGdGuardados();
+  } finally {
+    botonCalcularProcesarGd.disabled = false;
+  }
+}
+
+botonCalcularProcesarGd.addEventListener("click", calcularNotaTipoGd);
+botonCerrarProcesarTipoGd.addEventListener("click", () => dialogoProcesarTipoGd.close());
 
 // Al abrir el panel solo se mira si hay credenciales guardadas; entrar al
 // portal a comprobarlas se hace recién cuando hace falta usarlo.
@@ -3145,13 +3389,7 @@ function verNotasDeTipo(nombreElemento) {
 
   alumnos.forEach((alumno, indice) => {
     const fila = document.createElement("tr");
-    const valores = [
-      String(indice + 1),
-      alumno.alumno || "",
-      celdaNota(alumno),
-      alumno.actividad || alumno.estado_entrega || "",
-      alumno.nota_automatica || alumno.estado_nota || "",
-    ];
+    const valores = [String(indice + 1), alumno.alumno || "", celdaNota(alumno)];
     for (const valor of valores) {
       const celda = document.createElement("td");
       celda.textContent = valor;
@@ -3161,12 +3399,17 @@ function verNotasDeTipo(nombreElemento) {
   });
 
   const conNota = alumnos.filter((alumno) => alumno.nota && alumno.nota !== "--").length;
+  const automaticas = alumnos.filter((alumno) => alumno.nota_automatica).length;
   resumenNotas.textContent =
     `${nombreElemento}: ${alumnos.length} alumno(s), ${conNota} con nota puesta` +
-    (guardado.sobre ? ` (sobre ${guardado.sobre}).` : ".") +
-    ` Descargadas el ${fechaLegibleNotas(guardado.obtenido_en)}.`;
+    (guardado.sobre ? ` (sobre ${guardado.sobre})` : "") +
+    (automaticas ? `, ${automaticas} con cero automático` : "") +
+    `. Descargadas el ${fechaLegibleNotas(guardado.obtenido_en)}.`;
   resumenNotas.classList.remove("oculto");
   contenedorTablaNotas.classList.remove("oculto");
+  // El diálogo es largo: sin esto la tabla aparece fuera de la vista y
+  // parece que "Ver" no hubiera hecho nada.
+  resumenNotas.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function abrirDialogoNotas() {
