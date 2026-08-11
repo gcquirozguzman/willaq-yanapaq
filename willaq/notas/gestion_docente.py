@@ -27,6 +27,7 @@ import time
 from playwright.sync_api import sync_playwright
 
 from willaq.autenticacion import credenciales
+from willaq.notas.calculo import normalizar_nombre
 from willaq.autenticacion.gestion_docente import (
     SEGUNDOS_ENTRE_PASOS,
     _abrir_aplicativo_academico,
@@ -319,6 +320,30 @@ JS_FIRMA_DE_LA_TABLA = """
 }
 """
 
+# Escribe las notas en los campos de la tabla. No pulsa ningún botón de
+# guardar: solo deja los valores puestos para que el docente los revise y
+# decida él. Se disparan los eventos 'input' y 'change' a mano porque
+# asignar .value por código no los dispara solo, y esta pantalla los usa
+# para sus validadores (el (*) rojo que aparece si la nota no es válida).
+JS_ESCRIBIR_NOTAS = """
+(pares) => {
+  let puestas = 0;
+  const fallidas = [];
+  for (const par of pares) {
+    const campo = document.getElementById(par.id);
+    if (!campo) {
+      fallidas.push(par.id);
+      continue;
+    }
+    campo.value = par.valor;
+    campo.dispatchEvent(new Event("input", { bubbles: true }));
+    campo.dispatchEvent(new Event("change", { bubbles: true }));
+    puestas++;
+  }
+  return { puestas: puestas, fallidas: fallidas };
+}
+"""
+
 
 def _codigos_a_buscar(curso: dict) -> list:
     """Con qué textos se intenta reconocer al curso dentro de la tabla.
@@ -556,6 +581,79 @@ def _leer_alumnos(pagina, notificar) -> list:
     return filas
 
 
+def _llegar_hasta_los_tipos(pagina, curso, notificar, cancelado, marcar_esperando_token) -> dict:
+    """Recorre el portal hasta tener el combo de tipos de nota habilitado.
+
+    Es el camino que comparten las dos herramientas (leer los datos del
+    curso y escribir las notas): portal → Académico → Registro de Notas →
+    "Ingresar notas" del curso → token puesto por el docente.
+
+    Devuelve {"estado": "ok"|"credenciales"|"error", "tipos": [...],
+    "error": "..."}.
+    """
+    guardadas = credenciales.cargar()
+    if guardadas is None:
+        notificar("[AVISO] Falta guardar tu usuario y contraseña de Gestión Docente.")
+        notificar('        Hazlo con "Iniciar sesión" en la tarjeta de sesiones.')
+        return {"estado": "sin_credenciales", "tipos": []}
+
+    codigos = _codigos_a_buscar(curso)
+    seccion = _seccion_del_curso(curso)
+    if not codigos:
+        return {"estado": "error", "tipos": [], "error": "No se pudo saber el código del curso."}
+
+    notificar("Abriendo Gestión Docente...")
+    resultado = _entrar_al_portal(pagina, guardadas["usuario"], guardadas["clave"], notificar)
+    if resultado == "credenciales":
+        credenciales.olvidar()
+        notificar("[AVISO] El portal rechazó el usuario o la contraseña guardados.")
+        return {"estado": "credenciales", "tipos": []}
+    if resultado != "ok":
+        return {"estado": "error", "tipos": [], "error": "No se pudo entrar a Gestión Docente."}
+
+    pagina = _abrir_aplicativo_academico(pagina, notificar) or pagina
+
+    notificar("Abriendo Registro de Notas...")
+    if not _abrir_registro_de_notas_en_pagina(pagina, notificar):
+        return {"estado": "error", "tipos": [], "error": "El portal no dejó abrir Registro de Notas."}
+
+    notificar(f"Buscando el curso {codigos[0]} en la tabla...")
+    time.sleep(SEGUNDOS_ENTRE_PASOS)
+    marcado = pagina.evaluate(JS_MARCAR_BOTON_INGRESAR, [codigos, seccion])
+    if not marcado.get("encontrado"):
+        if marcado.get("motivo") == "sin_fila":
+            error = f"No se encontró el curso {codigos[0]} en Registro de Notas."
+        else:
+            error = f'No se encontró el botón "Ingresar notas" del curso {codigos[0]}.'
+        notificar(f"[AVISO] {error}")
+        return {"estado": "error", "tipos": [], "error": error}
+
+    notificar(f"Curso encontrado: {marcado.get('fila')}")
+    notificar('Pulsando "Ingresar notas"...')
+    pagina.click('[data-willaq-objetivo="1"]')
+    time.sleep(SEGUNDOS_ENTRE_PASOS)
+
+    notificar("=" * 60)
+    notificar("AHORA TE TOCA A TI, en la ventana del navegador:")
+    notificar("  1. Escribe el token.")
+    notificar('  2. Pulsa "Validar token".')
+    notificar("  3. Acepta el modal de confirmación que aparece.")
+    notificar("Cuando el portal habilite la lista de notas, sigo yo solo.")
+    notificar("=" * 60)
+    marcar_esperando_token()
+
+    tipos = _esperar_a_que_el_docente_valide_el_token(pagina, notificar, cancelado)
+    if not tipos:
+        return {
+            "estado": "error",
+            "tipos": [],
+            "error": "No se llegó a habilitar la lista de tipos de nota.",
+        }
+
+    notificar(f"[OK] Se encontraron {len(tipos)} tipo(s) de nota.")
+    return {"estado": "ok", "tipos": tipos, "pagina": pagina}
+
+
 def obtener_datos_del_curso(curso: dict, notificar=None, cancelado=None, marcar_esperando_token=None) -> dict:
     """Recorre el portal y trae los tipos de nota y la lista de alumnos.
 
@@ -570,84 +668,25 @@ def obtener_datos_del_curso(curso: dict, notificar=None, cancelado=None, marcar_
     los tipos.
 
     Devuelve {"estado": "ok"|"sin_credenciales"|"credenciales"|"error",
-    "tipos": [{"valor", "nombre"}], "alumnos": [{"nombre", "celdas"}],
+    "tipos": [{"valor", "nombre"}], "alumnos": [{"nombre", ...}],
     "error": "..."}.
     """
     notificar = notificar or print
     marcar_esperando_token = marcar_esperando_token or (lambda: None)
-
-    guardadas = credenciales.cargar()
-    if guardadas is None:
-        notificar("[AVISO] Falta guardar tu usuario y contraseña de Gestión Docente.")
-        notificar('        Hazlo con "Iniciar sesión" en la tarjeta de sesiones.')
-        return {"estado": "sin_credenciales", "tipos": []}
-
-    codigos = _codigos_a_buscar(curso)
-    seccion = _seccion_del_curso(curso)
-    if not codigos:
-        return {"estado": "error", "tipos": [], "error": "No se pudo saber el código del curso."}
 
     with sync_playwright() as playwright:
         navegador = playwright.chromium.launch(headless=False)
         contexto = navegador.new_context(no_viewport=True)
         try:
             pagina = contexto.new_page()
-
-            notificar("Abriendo Gestión Docente...")
-            resultado = _entrar_al_portal(
-                pagina, guardadas["usuario"], guardadas["clave"], notificar
+            recorrido = _llegar_hasta_los_tipos(
+                pagina, curso, notificar, cancelado, marcar_esperando_token
             )
-            if resultado == "credenciales":
-                credenciales.olvidar()
-                notificar("[AVISO] El portal rechazó el usuario o la contraseña guardados.")
-                return {"estado": "credenciales", "tipos": []}
-            if resultado != "ok":
-                return {"estado": "error", "tipos": [], "error": "No se pudo entrar a Gestión Docente."}
+            if recorrido["estado"] != "ok":
+                return {**recorrido, "alumnos": []}
 
-            pagina = _abrir_aplicativo_academico(pagina, notificar) or pagina
-
-            notificar("Abriendo Registro de Notas...")
-            if not _abrir_registro_de_notas_en_pagina(pagina, notificar):
-                return {
-                    "estado": "error",
-                    "tipos": [],
-                    "error": "El portal no dejó abrir Registro de Notas.",
-                }
-
-            notificar(f"Buscando el curso {codigos[0]} en la tabla...")
-            time.sleep(SEGUNDOS_ENTRE_PASOS)
-            marcado = pagina.evaluate(JS_MARCAR_BOTON_INGRESAR, [codigos, seccion])
-            if not marcado.get("encontrado"):
-                if marcado.get("motivo") == "sin_fila":
-                    error = f"No se encontró el curso {codigos[0]} en Registro de Notas."
-                else:
-                    error = f'No se encontró el botón "Ingresar notas" del curso {codigos[0]}.'
-                notificar(f"[AVISO] {error}")
-                return {"estado": "error", "tipos": [], "error": error}
-
-            notificar(f"Curso encontrado: {marcado.get('fila')}")
-            notificar('Pulsando "Ingresar notas"...')
-            pagina.click('[data-willaq-objetivo="1"]')
-            time.sleep(SEGUNDOS_ENTRE_PASOS)
-
-            notificar("=" * 60)
-            notificar("AHORA TE TOCA A TI, en la ventana del navegador:")
-            notificar("  1. Escribe el token.")
-            notificar('  2. Pulsa "Validar token".')
-            notificar("  3. Acepta el modal de confirmación que aparece.")
-            notificar("Cuando el portal habilite la lista de notas, sigo yo solo.")
-            notificar("=" * 60)
-            marcar_esperando_token()
-
-            tipos = _esperar_a_que_el_docente_valide_el_token(pagina, notificar, cancelado)
-            if not tipos:
-                return {
-                    "estado": "error",
-                    "tipos": [],
-                    "error": "No se llegó a habilitar la lista de tipos de nota.",
-                }
-
-            notificar(f"[OK] Se encontraron {len(tipos)} tipo(s) de nota:")
+            pagina = recorrido["pagina"]
+            tipos = recorrido["tipos"]
             for tipo in tipos:
                 notificar(f"     - {tipo['nombre']}")
 
@@ -669,3 +708,143 @@ def obtener_datos_del_curso(curso: dict, notificar=None, cancelado=None, marcar_
                 navegador.close()
             except Exception:
                 pass
+
+
+def _texto_de_nota(valor) -> str:
+    """Cómo se escribe la nota en el campo del portal.
+
+    Los enteros van sin el ".0" que arrastra Python (15.0 -> "15"), porque
+    es como el portal muestra las notas; si el cálculo dio decimales se
+    dejan tal cual, para no redondear por nuestra cuenta una nota que el
+    docente todavía está revisando.
+    """
+    if isinstance(valor, float) and valor.is_integer():
+        return str(int(valor))
+    return str(valor)
+
+
+def escribir_notas_en_portal(
+    curso: dict,
+    tipo_gd: str,
+    notas_por_alumno: dict,
+    notificar=None,
+    cancelado=None,
+    marcar_esperando_token=None,
+    al_quedar_listo=None,
+) -> dict:
+    """Deja escritas en el portal las notas calculadas de un tipo.
+
+    Hace el mismo recorrido de siempre, pero eligiendo en el combo el tipo
+    que el docente pidió procesar (no uno cualquiera), y después de quitar
+    el check escribe la nota de cada alumno en su casilla.
+
+    IMPORTANTE: no guarda nada. La tarea se da por terminada en cuanto las
+    notas quedan escritas ('al_quedar_listo'), pero la VENTANA no se cierra:
+    de ahí en adelante es del docente, que revisa lo que quiera y pulsa
+    guardar él mismo. Este hilo solo se queda esperando en silencio para
+    soltar el navegador cuando él lo cierre.
+
+    'notas_por_alumno' viene con el nombre del alumno tal como lo escribe el
+    portal, que es de donde se leyó.
+
+    Devuelve {"estado", "puestas", "sin_nota", "error"}.
+    """
+    notificar = notificar or print
+    marcar_esperando_token = marcar_esperando_token or (lambda: None)
+    al_quedar_listo = al_quedar_listo or (lambda resultado: None)
+
+    with sync_playwright() as playwright:
+        navegador = playwright.chromium.launch(headless=False)
+        contexto = navegador.new_context(no_viewport=True)
+        try:
+            pagina = contexto.new_page()
+            recorrido = _llegar_hasta_los_tipos(
+                pagina, curso, notificar, cancelado, marcar_esperando_token
+            )
+            if recorrido["estado"] != "ok":
+                return {**recorrido, "puestas": 0}
+
+            pagina = recorrido["pagina"]
+
+            # El tipo se busca por su nombre entre los que ofrece el portal
+            # ahora mismo: el valor guardado podría haber cambiado.
+            elegido = next(
+                (t for t in recorrido["tipos"] if t["nombre"].strip() == (tipo_gd or "").strip()),
+                None,
+            )
+            if elegido is None:
+                error = f'El portal no ofrece el tipo de nota "{tipo_gd}".'
+                notificar(f"[AVISO] {error}")
+                notificar(f"        Ofrece: {', '.join(t['nombre'] for t in recorrido['tipos'])}")
+                return {"estado": "error", "puestas": 0, "error": error}
+
+            if not elegir_tipo_y_preparar_lista(pagina, elegido, notificar):
+                return {
+                    "estado": "error",
+                    "puestas": 0,
+                    "error": "No se pudo preparar la lista de alumnos.",
+                }
+
+            alumnos = _leer_alumnos(pagina, notificar)
+            if not alumnos:
+                return {"estado": "error", "puestas": 0, "error": "No se pudo leer la lista de alumnos."}
+
+            # Se emparejan por nombre normalizado: los dos lados salieron de
+            # esta misma tabla, pero normalizar cuesta nada y evita que un
+            # espacio de más rompa el emparejamiento.
+            buscadas = {normalizar_nombre(n): v for n, v in notas_por_alumno.items()}
+            pares = []
+            sin_nota = []
+            for alumno in alumnos:
+                valor = buscadas.get(normalizar_nombre(alumno["nombre"]))
+                if valor is None or not alumno.get("id_campo_nota"):
+                    sin_nota.append(alumno["nombre"])
+                    continue
+                pares.append({"id": alumno["id_campo_nota"], "valor": _texto_de_nota(valor)})
+
+            notificar(f"Escribiendo {len(pares)} nota(s) en la pantalla...")
+            marco = _marco_con_combo(pagina) or pagina
+            escrito = marco.evaluate(JS_ESCRIBIR_NOTAS, pares)
+
+            notificar(f"[OK] Quedaron puestas {escrito.get('puestas')} nota(s).")
+            if sin_nota:
+                notificar(f"[AVISO] {len(sin_nota)} alumno(s) se quedaron sin nota:")
+                for nombre in sin_nota[:10]:
+                    notificar(f"     - {nombre}")
+            notificar("=" * 60)
+            notificar("NO se guardó nada: la ventana queda a tu cargo.")
+            notificar("Revisa lo que necesites y pulsa guardar tú mismo.")
+            notificar("=" * 60)
+
+            resultado = {
+                "estado": "ok",
+                "puestas": escrito.get("puestas", 0),
+                "sin_nota": sin_nota,
+            }
+
+            # Para el panel, la tarea termina acá: lo que sigue es trabajo
+            # del docente en la ventana, no de la herramienta.
+            al_quedar_listo(resultado)
+
+            # De aquí en adelante solo se espera, sin decir nada, a que
+            # cierre la ventana: hace falta para poder soltar el navegador,
+            # pero ya no es parte de la tarea.
+            while not _ventana_cerrada(contexto):
+                if cancelado is not None and cancelado():
+                    break
+                time.sleep(SEGUNDOS_ENTRE_SONDEOS_TOKEN)
+
+            return resultado
+        except Exception as error:
+            notificar(f"[ERROR] Ocurrió un problema en Gestión Docente: {error}")
+            return {"estado": "error", "puestas": 0, "error": str(error)}
+        finally:
+            try:
+                navegador.close()
+            except Exception:
+                pass
+
+
+def _ventana_cerrada(contexto) -> bool:
+    """True si el docente cerró a mano la ventana del navegador."""
+    return not any(not pagina.is_closed() for pagina in contexto.pages)

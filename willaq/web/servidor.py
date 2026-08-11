@@ -59,6 +59,7 @@ from willaq.dictado.sesiones import (
 )
 from willaq.notas.calculo import calcular_notas
 from willaq.notas.consultar import obtener_elementos_calificables, obtener_notas_de_elemento
+from willaq.notas import gestion_docente as gestion_docente_notas
 from willaq.notas.gestion_docente import obtener_datos_del_curso
 from willaq.notas.guardado import (
     guardar_calculo_gd,
@@ -237,6 +238,53 @@ def crear_app() -> Flask:
         )
         guardar_calculo_gd(codigo_curso, tipo_gd, {"elementos": elementos, "operacion": operacion})
         return jsonify(resultado)
+
+    @app.post("/api/gestion-docente/procesar-notas/escribir")
+    def escribir_notas_gd():
+        """Deja escritas en el portal las notas calculadas de un tipo.
+
+        No guarda nada en Gestión Docente: escribe los valores en pantalla y
+        deja la ventana abierta para que el docente los revise y decida.
+        """
+        if estado_procesar_notas_gd.en_progreso:
+            return jsonify({"error": "Ya hay una operación en curso."}), 409
+
+        datos = request.get_json(silent=True) or {}
+        curso = datos.get("curso") or {}
+        tipo_gd = datos.get("tipo_gd")
+        elementos = datos.get("elementos") or []
+        operacion = datos.get("operacion") or "promedio"
+
+        if not curso.get("codigo") or not tipo_gd or not elementos:
+            return jsonify({"error": "Falta el curso, el tipo de nota o las notas a usar."}), 400
+
+        guardado = obtener_datos_gd(curso["codigo"]) or {}
+        alumnos = guardado.get("alumnos") or []
+        if not alumnos:
+            return jsonify(
+                {"error": 'Todavía no hay alumnos del portal: pulsa "Obtener datos" primero.'}
+            ), 400
+
+        # Se recalcula aquí en vez de recibir las notas del navegador: así lo
+        # que se escribe en el portal sale de los mismos datos guardados que
+        # se acaban de mostrar en pantalla, sin pasar por el camino largo.
+        calculo = calcular_notas(
+            alumnos, obtener_notas_de_curso(curso["codigo"]), elementos, operacion
+        )
+        notas = {
+            fila["nombre_gd"]: fila["nota"]
+            for fila in calculo["filas"]
+            if fila.get("nota") is not None
+        }
+        if not notas:
+            return jsonify({"error": "El cálculo no dejó ninguna nota que escribir."}), 400
+
+        estado_procesar_notas_gd.iniciar()
+        hilo = threading.Thread(
+            target=_escribir_notas_gd_en_hilo, args=(curso, tipo_gd, notas), daemon=True
+        )
+        hilo.start()
+        return jsonify({"ok": True, "notas": len(notas)})
 
     @app.post("/api/gestion-docente/procesar-notas/cerrar")
     def cerrar_procesar_notas_gd():
@@ -562,6 +610,58 @@ def _obtener_datos_gd_en_hilo(curso: dict):
         estado_procesar_notas_gd.marcar_terminado("error", error=str(error))
     finally:
         estado_procesar_notas_gd.evento_cierre.clear()
+
+
+def _escribir_notas_gd_en_hilo(curso: dict, tipo_gd: str, notas: dict):
+    """Escribe las notas calculadas en la pantalla del portal, en un hilo aparte.
+
+    Como el recorrido pasa por el token y después deja la ventana abierta
+    hasta que el docente la cierre, esto puede durar bastante: por eso corre
+    aparte y no bloqueando la petición HTTP.
+    """
+
+    def notificar(mensaje):
+        estado_procesar_notas_gd.agregar_log(mensaje)
+
+    def marcar_esperando_token():
+        estado_procesar_notas_gd.marcar_fase("esperando_login_manual")
+
+    # La tarea se da por terminada apenas las notas quedan escritas. Lo que
+    # viene después (revisarlas y guardar) lo hace el docente en la ventana,
+    # así que no tiene sentido que el panel siga mostrándose ocupado.
+    ya_termino = threading.Event()
+
+    def al_quedar_listo(resultado):
+        estado_procesar_notas_gd.marcar_terminado("ok")
+        ya_termino.set()
+
+    def cancelado():
+        return estado_procesar_notas_gd.evento_cierre.is_set()
+
+    try:
+        resultado = gestion_docente_notas.escribir_notas_en_portal(
+            curso,
+            tipo_gd,
+            notas,
+            notificar=notificar,
+            cancelado=cancelado,
+            marcar_esperando_token=marcar_esperando_token,
+            al_quedar_listo=al_quedar_listo,
+        )
+        estado = resultado.get("estado")
+        if estado in ("sin_credenciales", "credenciales"):
+            estado_login_gestion_docente.marcar_terminado(estado, sesion_activa=False)
+        # Si ya se dio por terminada al escribir, no se vuelve a tocar: el
+        # docente pudo haber empezado otra cosa mientras revisaba.
+        if not ya_termino.is_set():
+            estado_procesar_notas_gd.marcar_terminado(estado, error=resultado.get("error"))
+    except Exception as error:
+        estado_procesar_notas_gd.agregar_log(f"[ERROR] Ocurrió un problema inesperado: {error}")
+        if not ya_termino.is_set():
+            estado_procesar_notas_gd.marcar_terminado("error", error=str(error))
+    finally:
+        if not ya_termino.is_set():
+            estado_procesar_notas_gd.evento_cierre.clear()
 
 
 def _obtener_cursos_en_hilo():

@@ -794,6 +794,7 @@ const contenedorTablaProcesarGd = document.getElementById("contenedor-tabla-proc
 const cuerpoTablaProcesarGd = document.getElementById("cuerpo-tabla-procesar-gd");
 const botonProcesarTipoGd = document.getElementById("boton-procesar-tipo-gd");
 const botonCerrarProcesarTipoGd = document.getElementById("boton-cerrar-procesar-tipo-gd");
+const registroProcesarTipoGd = document.getElementById("registro-procesar-tipo-gd");
 
 let tipoGdEnProceso = null;
 // Mientras se arma el modal se cambian casillas y combo por código; sin
@@ -1050,12 +1051,73 @@ async function calcularNotaTipoGd() {
 }
 
 campoOperacionGd.addEventListener("change", alCambiarAlgoDelProcesoGd);
-botonProcesarTipoGd.addEventListener("click", () => {
-  // Registrar las notas en el portal todavía no está hecho; se dice tal
-  // cual en vez de dejar un botón que parezca haber hecho algo.
+
+// --- Escribir las notas calculadas en la pantalla del portal ---
+// Repite el recorrido de "Obtener datos" (con su token y su check), pero
+// eligiendo en el combo el tipo que se está procesando, y deja escritas las
+// notas SIN guardarlas: la ventana queda abierta para que el docente las
+// revise y la cierre él.
+
+let intervaloEscribirNotasGd = null;
+
+async function seguirEscrituraDeNotasGd() {
+  const respuesta = await fetch("/api/gestion-docente/procesar-notas/estado");
+  const estado = await respuesta.json();
+  registroProcesarTipoGd.textContent = (estado.logs || []).join("\n");
+
+  if (estado.fase === "esperando_login_manual") {
+    mensajeProcesarTipoGd.textContent =
+      'Escribe el token en la ventana, pulsa "Validar token" y acepta el modal...';
+    return;
+  }
+  if (estado.fase !== "terminado") {
+    mensajeProcesarTipoGd.textContent = "Entrando a Gestión Docente...";
+    return;
+  }
+
+  clearInterval(intervaloEscribirNotasGd);
+  intervaloEscribirNotasGd = null;
+  botonProcesarTipoGd.disabled = false;
+  actualizarBloqueoProcesarNotasGd();
+
   mensajeProcesarTipoGd.textContent =
-    "Registrar estas notas en Gestión Docente todavía no está implementado.";
-});
+    estado.resultado === "ok"
+      ? "Listo: las notas quedaron puestas en la ventana y no se guardó nada. Revísalas y guarda tú."
+      : estado.error || "No se pudieron escribir las notas en Gestión Docente.";
+}
+
+async function escribirNotasEnPortal() {
+  const curso = cursoNotasGdSeleccionado();
+  const elementos = elementosBlackboardElegidos();
+  if (!curso || !tipoGdEnProceso || elementos.length === 0) {
+    return;
+  }
+
+  botonProcesarTipoGd.disabled = true;
+  mensajeProcesarTipoGd.textContent = "Entrando a Gestión Docente...";
+
+  const respuesta = await fetch("/api/gestion-docente/procesar-notas/escribir", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      curso,
+      tipo_gd: tipoGdEnProceso.nombre,
+      elementos,
+      operacion: elementos.length > 1 ? campoOperacionGd.value : campoOperacionGd.options[0].value,
+    }),
+  });
+  const datos = await respuesta.json();
+  if (!respuesta.ok) {
+    mensajeProcesarTipoGd.textContent = datos.error || "No se pudo empezar.";
+    botonProcesarTipoGd.disabled = false;
+    return;
+  }
+
+  clearInterval(intervaloEscribirNotasGd);
+  intervaloEscribirNotasGd = setInterval(seguirEscrituraDeNotasGd, 1000);
+}
+
+botonProcesarTipoGd.addEventListener("click", escribirNotasEnPortal);
 botonCerrarProcesarTipoGd.addEventListener("click", () => {
   dialogoProcesarTipoGd.close();
   // Al volver, la lista de tipos muestra la configuración recién guardada.
