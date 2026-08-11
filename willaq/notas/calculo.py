@@ -22,8 +22,44 @@ pueda revisar antes.
 
 import re
 import unicodedata
+from difflib import SequenceMatcher
 
 OPERACIONES = ("suma", "promedio")
+
+# A partir de qué parecido se acepta que dos nombres son la misma persona
+# cuando no son idénticos. Los casos reales son cosas como un apellido
+# compuesto que en un sistema va junto y en el otro separado, o un segundo
+# nombre que falta: eso queda muy por encima de 75. Por debajo, es más
+# probable que sean dos personas distintas, y ahí se prefiere no emparejar
+# y avisar, porque una nota puesta al alumno equivocado es peor que una
+# nota que falta.
+PARECIDO_MINIMO = 75
+
+# Desde qué parecido vale la pena siquiera mencionar al candidato como
+# "lo más parecido". Por debajo son nombres que no tienen nada que ver y
+# nombrarlos solo ensucia la observación.
+PARECIDO_PARA_SUGERIR = 50
+
+
+def parecido_entre_nombres(uno: str, otro: str) -> int:
+    """Cuánto se parecen dos nombres, de 0 a 100.
+
+    Se mezclan dos miradas porque cada una falla sola: cuántas palabras
+    tienen en común (buena para el orden y para nombres partidos, ciega a
+    las erratas) y el parecido letra a letra (bueno para las erratas, ciego
+    al orden). El peso se carga a las palabras, que es como se diferencian
+    de verdad los nombres.
+    """
+    a, b = normalizar_nombre(uno), normalizar_nombre(otro)
+    if not a or not b:
+        return 0
+    if a == b:
+        return 100
+
+    palabras_a, palabras_b = set(a.split()), set(b.split())
+    comunes = len(palabras_a & palabras_b) / max(len(palabras_a), len(palabras_b))
+    letras = SequenceMatcher(None, a, b).ratio()
+    return round(100 * (0.6 * comunes + 0.4 * letras))
 
 
 def normalizar_nombre(nombre: str) -> str:
@@ -54,6 +90,24 @@ def _a_numero(valor):
         return None
 
 
+def _mas_parecido(nombre: str, por_alumno: dict, ya_usados: set):
+    """El alumno de Blackboard más parecido a ese nombre, entre los libres.
+
+    Se saltan los ya emparejados para que dos alumnos del portal no
+    terminen apuntando al mismo alumno de Blackboard.
+    """
+    mejor_clave = None
+    mejor = {"parecido": 0, "entrada": None}
+    for clave, entrada in por_alumno.items():
+        if clave in ya_usados:
+            continue
+        parecido = parecido_entre_nombres(nombre, entrada["nombre"])
+        if parecido > mejor["parecido"]:
+            mejor_clave = clave
+            mejor = {"parecido": parecido, "entrada": entrada}
+    return (mejor_clave, mejor) if mejor["entrada"] else (None, mejor)
+
+
 def calcular_notas(alumnos_gd: list, notas_por_elemento: dict, elementos: list, operacion: str) -> dict:
     """Cruza los alumnos del portal con las notas de Blackboard y calcula.
 
@@ -72,28 +126,49 @@ def calcular_notas(alumnos_gd: list, notas_por_elemento: dict, elementos: list, 
     if operacion not in OPERACIONES:
         operacion = "promedio"
 
-    # Índice de las notas de Blackboard por nombre normalizado.
+    # Índice de Blackboard por nombre normalizado. Se guarda también el
+    # nombre TAL COMO lo escribe Blackboard, porque el panel muestra las dos
+    # versiones lado a lado para que se pueda revisar de un vistazo que el
+    # cruce emparejó a la persona correcta.
     por_alumno = {}
     for elemento in elementos:
         guardado = notas_por_elemento.get(elemento) or {}
         for alumno in guardado.get("alumnos") or []:
-            clave = normalizar_nombre(alumno.get("alumno"))
+            original = alumno.get("alumno")
+            clave = normalizar_nombre(original)
             if not clave:
                 continue
-            por_alumno.setdefault(clave, {})[elemento] = _a_numero(alumno.get("nota"))
+            entrada = por_alumno.setdefault(clave, {"nombre": original, "notas": {}})
+            entrada["notas"][elemento] = _a_numero(alumno.get("nota"))
 
     filas = []
     usados = set()
     for alumno in alumnos_gd:
-        nombre = alumno.get("nombre") if isinstance(alumno, dict) else str(alumno)
-        clave = normalizar_nombre(nombre)
-        del_alumno = por_alumno.get(clave)
-        usados.add(clave)
+        nombre_gd = alumno.get("nombre") if isinstance(alumno, dict) else str(alumno)
+        clave = normalizar_nombre(nombre_gd)
 
-        detalle = {e: (del_alumno or {}).get(e) for e in elementos}
+        encontrado = por_alumno.get(clave)
+        parecido = 100 if encontrado else 0
+        sugerencia = ""
+
+        # Sin coincidencia exacta se busca el más parecido: los dos sistemas
+        # no siempre escriben igual al mismo alumno.
+        if not encontrado:
+            mejor_clave, mejor = _mas_parecido(nombre_gd, por_alumno, usados)
+            if mejor_clave:
+                parecido = mejor["parecido"]
+                if parecido >= PARECIDO_MINIMO:
+                    encontrado = mejor["entrada"]
+                    clave = mejor_clave
+                elif parecido >= PARECIDO_PARA_SUGERIR:
+                    sugerencia = mejor["entrada"]["nombre"]
+
+        usados.add(clave)
+        notas = (encontrado or {}).get("notas") or {}
+        detalle = {e: notas.get(e) for e in elementos}
         valores = [v for v in detalle.values() if v is not None]
 
-        if not del_alumno:
+        if not encontrado:
             nota = None
             estado = "sin_coincidencia"
         elif not valores:
@@ -104,26 +179,32 @@ def calcular_notas(alumnos_gd: list, notas_por_elemento: dict, elementos: list, 
             nota = round(nota, 2)
             estado = "ok" if len(valores) == len(elementos) else "incompleto"
 
-        filas.append({"nombre": nombre, "nota": nota, "estado": estado, "detalle": detalle})
+        filas.append(
+            {
+                "nombre": nombre_gd,
+                "nombre_gd": nombre_gd,
+                "nombre_bb": (encontrado or {}).get("nombre", ""),
+                "codigo": alumno.get("codigo", "") if isinstance(alumno, dict) else "",
+                "coincidencia": parecido if encontrado else 0,
+                "sugerencia": sugerencia,
+                "parecido_sugerencia": parecido if sugerencia else 0,
+                "nota": nota,
+                "estado": estado,
+                "detalle": detalle,
+            }
+        )
 
     # Los de Blackboard que no aparecieron en el portal: casi siempre son
     # alumnos retirados, pero conviene que el docente los vea.
-    sin_encontrar = []
-    for clave, del_alumno in por_alumno.items():
-        if clave in usados:
-            continue
-        for elemento in elementos:
-            guardado = notas_por_elemento.get(elemento) or {}
-            for alumno in guardado.get("alumnos") or []:
-                if normalizar_nombre(alumno.get("alumno")) == clave:
-                    sin_encontrar.append(alumno.get("alumno"))
-                    break
-            if sin_encontrar and sin_encontrar[-1]:
-                break
+    sin_encontrar = sorted(
+        entrada["nombre"]
+        for clave, entrada in por_alumno.items()
+        if clave not in usados and entrada.get("nombre")
+    )
 
     return {
         "filas": filas,
-        "sin_encontrar": sorted(set(n for n in sin_encontrar if n)),
+        "sin_encontrar": sin_encontrar,
         "operacion": operacion,
         "elementos": list(elementos),
     }

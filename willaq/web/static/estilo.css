@@ -1025,9 +1025,61 @@ html[data-tema="oscuro"] .logo-claro {
   overflow-y: auto;
 }
 
-#contenedor-tabla-notas {
+/* El contenido del diálogo es un flex en columna con altura máxima, así que
+   sus hijos se encogen cuando lo de arriba ya llena esa altura. A las tablas
+   les pasaba justo eso: se creaban con todas sus filas pero quedaban
+   aplastadas a unos 20px de alto, o sea invisibles. 'flex-shrink: 0' se lo
+   impide y 'min-height' les garantiza un alto útil aunque el diálogo venga
+   cargado. */
+.dialogo-contenido .tabla-scroll {
+  flex-shrink: 0;
+  min-height: 200px;
+}
+
+#contenedor-tabla-notas,
+#contenedor-tabla-alumnos-gd,
+#contenedor-tabla-procesar-gd {
   max-height: 45vh;
   overflow-y: auto;
+}
+
+#dialogo-procesar-notas-gd .dialogo-contenido,
+#dialogo-procesar-tipo-gd .dialogo-contenido {
+  max-height: 88vh;
+  overflow-y: auto;
+}
+
+#contenedor-tabla-alumnos-gd .tabla-anuncios th,
+#contenedor-tabla-procesar-gd .tabla-anuncios th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+/* Cuánto se parecen los dos nombres que se emparejaron. Se dibuja como
+   barra y no solo como número porque lo que interesa es detectar de un
+   vistazo las filas flojas mientras se recorre la lista; el color lo pone
+   el JS (verde al 100%, cayendo a rojo). */
+.barra-coincidencia {
+  display: inline-block;
+  vertical-align: middle;
+  width: 64px;
+  height: 8px;
+  border-radius: 4px;
+  background-color: rgba(127, 127, 127, 0.25);
+  overflow: hidden;
+}
+
+.relleno-coincidencia {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+}
+
+.texto-coincidencia {
+  margin-left: 8px;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Con la tabla scrolleando por dentro, el encabezado se queda fijo arriba

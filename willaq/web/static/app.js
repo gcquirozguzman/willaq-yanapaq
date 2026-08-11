@@ -792,10 +792,18 @@ const resumenProcesarTipoGd = document.getElementById("resumen-procesar-tipo-gd"
 const encabezadoTablaProcesarGd = document.getElementById("encabezado-tabla-procesar-gd");
 const contenedorTablaProcesarGd = document.getElementById("contenedor-tabla-procesar-gd");
 const cuerpoTablaProcesarGd = document.getElementById("cuerpo-tabla-procesar-gd");
-const botonCalcularProcesarGd = document.getElementById("boton-calcular-procesar-gd");
+const botonProcesarTipoGd = document.getElementById("boton-procesar-tipo-gd");
 const botonCerrarProcesarTipoGd = document.getElementById("boton-cerrar-procesar-tipo-gd");
 
 let tipoGdEnProceso = null;
+// Mientras se arma el modal se cambian casillas y combo por código; sin
+// esto, cada uno de esos cambios dispararía su propio cálculo.
+let armandoModalProcesarGd = false;
+// Cada cálculo lleva número: si el docente cambia algo mientras uno está en
+// vuelo, la respuesta que llegue tarde se descarta. Sin esto, desmarcar dos
+// casillas seguidas dejaba a la vista el resultado de la primera, que ya no
+// correspondía a lo marcado.
+let numeroDeCalculoGd = 0;
 
 function elementosBlackboardElegidos() {
   return Array.from(
@@ -805,7 +813,22 @@ function elementosBlackboardElegidos() {
 
 // La pregunta de suma o promedio solo tiene sentido con más de una nota.
 function actualizarOperacionGd() {
-  filaOperacionGd.classList.toggle("oculto", elementosBlackboardElegidos().length < 2);
+  const varias = elementosBlackboardElegidos().length > 1;
+  filaOperacionGd.classList.toggle("oculto", !varias);
+  // Con una sola nota no hay nada que combinar: se usa la primera opción
+  // del combo, que es la que el docente ve por defecto.
+  if (!varias) {
+    campoOperacionGd.selectedIndex = 0;
+  }
+}
+
+// Cualquier cambio (marcar, desmarcar, cambiar suma/promedio) recalcula.
+function alCambiarAlgoDelProcesoGd() {
+  if (armandoModalProcesarGd) {
+    return;
+  }
+  actualizarOperacionGd();
+  calcularNotaTipoGd();
 }
 
 async function abrirDialogoProcesarTipoGd(tipo) {
@@ -815,6 +838,7 @@ async function abrirDialogoProcesarTipoGd(tipo) {
   }
 
   tipoGdEnProceso = tipo;
+  armandoModalProcesarGd = true;
   tituloProcesarTipoGd.textContent = `Procesar ${tipo.nombre}`;
   mensajeProcesarTipoGd.textContent = "";
   resumenProcesarTipoGd.classList.add("oculto");
@@ -853,7 +877,7 @@ async function abrirDialogoProcesarTipoGd(tipo) {
     casilla.type = "checkbox";
     casilla.value = nombre;
     casilla.checked = (guardado.elementos || []).includes(nombre);
-    casilla.addEventListener("change", actualizarOperacionGd);
+    casilla.addEventListener("change", alCambiarAlgoDelProcesoGd);
 
     const texto = document.createElement("span");
     const cuantos = (notasBlackboard[nombre].alumnos || []).length;
@@ -864,9 +888,17 @@ async function abrirDialogoProcesarTipoGd(tipo) {
     listaElementosBlackboardGd.appendChild(item);
   }
 
-  campoOperacionGd.value = guardado.operacion || "promedio";
+  // Sin nada guardado se usa la primera opción del combo, que es la que se
+  // ve por defecto; con algo guardado, lo que el docente eligió la vez
+  // anterior.
+  campoOperacionGd.value = guardado.operacion || campoOperacionGd.options[0].value;
   actualizarOperacionGd();
+  armandoModalProcesarGd = false;
+
   dialogoProcesarTipoGd.showModal();
+  // Si ya venía configurado, se muestra el resultado de entrada, sin tener
+  // que pulsar nada.
+  calcularNotaTipoGd();
 }
 
 const TEXTOS_ESTADO_CALCULO = {
@@ -876,11 +908,50 @@ const TEXTOS_ESTADO_CALCULO = {
   sin_coincidencia: "No se encontró en Blackboard",
 };
 
+function observacionDeFila(fila) {
+  const base = TEXTOS_ESTADO_CALCULO[fila.estado] || "";
+  // Cuando no se emparejó pero había alguien parecido, se dice quién: casi
+  // siempre es un nombre escrito distinto y conviene poder revisarlo.
+  if (fila.estado === "sin_coincidencia" && fila.sugerencia) {
+    return `${base} (lo más parecido: ${fila.sugerencia}, ${fila.parecido_sugerencia}%)`;
+  }
+  return base;
+}
+
+// Verde al 100%, y va cayendo a rojo a medida que el nombre se parece
+// menos. Por debajo de 60% ya es todo rojo: ahí no hay parecido que valga.
+function colorDeCoincidencia(porcentaje) {
+  const tono = Math.max(0, Math.min(1, (porcentaje - 60) / 40)) * 120;
+  return `hsl(${tono}, 65%, 45%)`;
+}
+
+function celdaCoincidencia(porcentaje) {
+  const celda = document.createElement("td");
+  const caja = document.createElement("div");
+  caja.className = "barra-coincidencia";
+
+  const relleno = document.createElement("span");
+  relleno.className = "relleno-coincidencia";
+  relleno.style.width = `${porcentaje}%`;
+  relleno.style.backgroundColor = colorDeCoincidencia(porcentaje);
+
+  const texto = document.createElement("span");
+  texto.className = "texto-coincidencia";
+  texto.textContent = `${porcentaje}%`;
+
+  caja.append(relleno);
+  celda.append(caja, texto);
+  return celda;
+}
+
 function mostrarCalculoGd(resultado) {
   const elementos = resultado.elementos || [];
 
+  // Se muestran los dos nombres, uno al lado del otro: así se ve de un
+  // vistazo con quién emparejó el cruce y si se equivocó de persona.
   encabezadoTablaProcesarGd.innerHTML = "";
-  for (const titulo of ["#", "Alumno", ...elementos, "Nota final", "Observación"]) {
+  const titulos = ["#", "Blackboard", "Gestión Docente", "Coincidencia", ...elementos, "Nota final", "Observación"];
+  for (const titulo of titulos) {
     const celda = document.createElement("th");
     celda.textContent = titulo;
     encabezadoTablaProcesarGd.appendChild(celda);
@@ -889,14 +960,21 @@ function mostrarCalculoGd(resultado) {
   cuerpoTablaProcesarGd.innerHTML = "";
   (resultado.filas || []).forEach((fila, indice) => {
     const tr = document.createElement("tr");
-    const valores = [
-      indice + 1,
-      fila.nombre,
+
+    for (const valor of [indice + 1, fila.nombre_bb || "—", fila.nombre_gd || fila.nombre]) {
+      const td = document.createElement("td");
+      td.textContent = valor;
+      tr.appendChild(td);
+    }
+
+    tr.appendChild(celdaCoincidencia(fila.coincidencia || 0));
+
+    const resto = [
       ...elementos.map((e) => (fila.detalle[e] === null ? "—" : fila.detalle[e])),
       fila.nota === null ? "—" : fila.nota,
-      TEXTOS_ESTADO_CALCULO[fila.estado] || "",
+      observacionDeFila(fila),
     ];
-    for (const valor of valores) {
+    for (const valor of resto) {
       const td = document.createElement("td");
       td.textContent = valor;
       tr.appendChild(td);
@@ -917,45 +995,72 @@ function mostrarCalculoGd(resultado) {
   contenedorTablaProcesarGd.classList.remove("oculto");
 }
 
+function limpiarCalculoGd() {
+  resumenProcesarTipoGd.classList.add("oculto");
+  contenedorTablaProcesarGd.classList.add("oculto");
+  cuerpoTablaProcesarGd.innerHTML = "";
+}
+
+// Se dispara sola con cada cambio, así que no hay botón de calcular: lo que
+// se ve en pantalla siempre corresponde a lo que está marcado ahora.
 async function calcularNotaTipoGd() {
   const curso = cursoNotasGdSeleccionado();
   const elementos = elementosBlackboardElegidos();
   if (!curso || !tipoGdEnProceso) {
     return;
   }
+
+  const miNumero = ++numeroDeCalculoGd;
+
   if (elementos.length === 0) {
+    // Sin nada marcado no hay nota que armar: se limpia en vez de dejar a
+    // la vista un resultado que ya no corresponde a lo elegido.
+    limpiarCalculoGd();
+    botonProcesarTipoGd.disabled = true;
     mensajeProcesarTipoGd.textContent = "Marca al menos una nota de Blackboard.";
     return;
   }
 
-  mensajeProcesarTipoGd.textContent = "";
-  botonCalcularProcesarGd.disabled = true;
-  try {
-    const respuesta = await fetch("/api/gestion-docente/procesar-notas/calcular", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        codigo_curso: curso.codigo,
-        tipo_gd: tipoGdEnProceso.nombre,
-        elementos,
-        operacion: elementos.length > 1 ? campoOperacionGd.value : "promedio",
-      }),
-    });
-    const datos = await respuesta.json();
-    if (!respuesta.ok) {
-      mensajeProcesarTipoGd.textContent = datos.error || "No se pudo calcular.";
-      return;
-    }
-    mostrarCalculoGd(datos);
-    // La elección quedó guardada en el servidor: se refleja en la lista.
-    await cargarTiposNotaGdGuardados();
-  } finally {
-    botonCalcularProcesarGd.disabled = false;
+  mensajeProcesarTipoGd.textContent = "Calculando...";
+  const respuesta = await fetch("/api/gestion-docente/procesar-notas/calcular", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      codigo_curso: curso.codigo,
+      tipo_gd: tipoGdEnProceso.nombre,
+      elementos,
+      operacion: elementos.length > 1 ? campoOperacionGd.value : campoOperacionGd.options[0].value,
+    }),
+  });
+  const datos = await respuesta.json();
+  // Llegó tarde: el docente ya cambió algo y hay otro cálculo mandando.
+  if (miNumero !== numeroDeCalculoGd) {
+    return;
   }
+  if (!respuesta.ok) {
+    limpiarCalculoGd();
+    botonProcesarTipoGd.disabled = true;
+    mensajeProcesarTipoGd.textContent = datos.error || "No se pudo calcular.";
+    return;
+  }
+
+  mensajeProcesarTipoGd.textContent = "";
+  botonProcesarTipoGd.disabled = false;
+  mostrarCalculoGd(datos);
 }
 
-botonCalcularProcesarGd.addEventListener("click", calcularNotaTipoGd);
-botonCerrarProcesarTipoGd.addEventListener("click", () => dialogoProcesarTipoGd.close());
+campoOperacionGd.addEventListener("change", alCambiarAlgoDelProcesoGd);
+botonProcesarTipoGd.addEventListener("click", () => {
+  // Registrar las notas en el portal todavía no está hecho; se dice tal
+  // cual en vez de dejar un botón que parezca haber hecho algo.
+  mensajeProcesarTipoGd.textContent =
+    "Registrar estas notas en Gestión Docente todavía no está implementado.";
+});
+botonCerrarProcesarTipoGd.addEventListener("click", () => {
+  dialogoProcesarTipoGd.close();
+  // Al volver, la lista de tipos muestra la configuración recién guardada.
+  cargarTiposNotaGdGuardados();
+});
 
 // Al abrir el panel solo se mira si hay credenciales guardadas; entrar al
 // portal a comprobarlas se hace recién cuando hace falta usarlo.
@@ -3197,10 +3302,11 @@ function cursoNotasSeleccionado() {
 }
 
 function celdaNota(alumno) {
-  // Blackboard muestra "--" en el campo de nota cuando todavía no hay
-  // ninguna puesta; se deja tal cual para no inventar un 0 que no existe.
-  const nota = alumno.nota && alumno.nota !== "--" ? alumno.nota : "—";
-  return alumno.sobre && nota !== "—" ? `${nota} / ${alumno.sobre}` : nota;
+  // Solo el número: sobre cuánto es la nota se dice una vez en el resumen
+  // de arriba, así que repetir "/ 20" en cada fila solo estorbaba.
+  // Blackboard muestra "--" cuando todavía no hay nota puesta; eso se marca
+  // con una raya para no inventar un 0 que nadie puso.
+  return alumno.nota && alumno.nota !== "--" ? alumno.nota : "—";
 }
 
 // --- La lista de tipos de nota, con un botón "Obtener" y otro "Ver" ---

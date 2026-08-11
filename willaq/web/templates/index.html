@@ -776,10 +776,10 @@
       <h2 id="titulo-procesar-tipo-gd">Procesar nota</h2>
       <p class="descripcion-dialogo">
         Marca qué notas de Blackboard forman esta nota. Si eliges más de una, indica si se
-        <strong>suman</strong> o se <strong>promedian</strong>. Los alumnos se cruzan por nombre
-        entre los dos sistemas (sin importar tildes ni el orden de apellidos). Esto solo calcula
-        y te muestra el resultado para que lo revises: <strong>no registra nada</strong> en
-        Gestión Docente.
+        <strong>suman</strong> o se <strong>promedian</strong>. El resultado se recalcula solo
+        cada vez que cambias algo. Los alumnos se cruzan por nombre entre los dos sistemas (sin
+        importar tildes ni el orden de apellidos). Aquí solo se calcula y se muestra:
+        <strong>no registra nada</strong> en Gestión Docente.
       </p>
 
       <ul id="lista-elementos-blackboard-gd" class="lista-tipos-notas"></ul>
@@ -803,7 +803,9 @@
           <thead>
             <tr id="encabezado-tabla-procesar-gd">
               <th>#</th>
-              <th>Alumno</th>
+              <th>Blackboard</th>
+              <th>Gestión Docente</th>
+              <th>Coincidencia</th>
               <th>Nota final</th>
             </tr>
           </thead>
@@ -812,7 +814,7 @@
       </div>
 
       <div class="botonera">
-        <button type="button" id="boton-calcular-procesar-gd" class="boton boton-primario">Calcular</button>
+        <button type="button" id="boton-procesar-tipo-gd" class="boton boton-primario">Procesar</button>
         <button type="button" id="boton-cerrar-procesar-tipo-gd" class="boton boton-secundario">Cerrar</button>
       </div>
     </div>
