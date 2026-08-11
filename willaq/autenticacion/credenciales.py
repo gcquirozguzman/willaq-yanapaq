@@ -15,8 +15,10 @@ computadora o lo abre desde otra cuenta de Windows. Aun así vive dentro de
 datos/, que está en .gitignore y nunca se sube al repositorio.
 
 Si DPAPI no estuviera disponible (por ejemplo, corriendo esto fuera de
-Windows), se guarda sin cifrar antes que romper la herramienta, pero se
-deja constancia en el propio archivo ('protegido': false) para que se sepa.
+Windows), NO se guarda nada: antes se escribía la contraseña sin cifrar
+para no romper la herramienta, y eso dejaba la contraseña del docente
+legible en un archivo de texto. Es preferible que el panel avise de que
+no pudo guardarla y se la vuelva a pedir, a dejarla ahí en claro.
 """
 
 import base64
@@ -80,12 +82,14 @@ def _descifrar(texto_base64: str) -> str:
 
 
 def guardar(usuario: str, clave: str):
-    """Guarda las credenciales, cifradas si el sistema lo permite."""
+    """Guarda las credenciales cifradas. Si no se pueden cifrar, no guarda nada.
+
+    Lanza una excepción cuando el cifrado falla, en vez de caer a guardar la
+    contraseña en claro: quien llama la reporta al docente y este vuelve a
+    escribirla cuando la necesite.
+    """
     DIR_DATOS.mkdir(parents=True, exist_ok=True)
-    try:
-        contenido = {"usuario": usuario, "clave": _cifrar(clave), "protegido": True}
-    except Exception:
-        contenido = {"usuario": usuario, "clave": clave, "protegido": False}
+    contenido = {"usuario": usuario, "clave": _cifrar(clave), "protegido": True}
     RUTA_CREDENCIALES.write_text(
         json.dumps(contenido, ensure_ascii=False), encoding="utf-8"
     )
@@ -101,9 +105,13 @@ def cargar() -> dict | None:
         clave = datos.get("clave")
         if not usuario or not clave:
             return None
-        if datos.get("protegido"):
-            clave = _descifrar(clave)
-        return {"usuario": usuario, "clave": clave}
+        if not datos.get("protegido"):
+            # Archivo de una versión anterior, que sí guardaba la contraseña
+            # sin cifrar. No se usa y se borra: no tiene sentido dejar ahí una
+            # contraseña en claro que ya no se va a leer.
+            olvidar()
+            return None
+        return {"usuario": usuario, "clave": _descifrar(clave)}
     except Exception:
         # Un archivo ilegible (cifrado en otra cuenta de Windows, corrupto)
         # equivale a no tener credenciales: se vuelven a pedir.
