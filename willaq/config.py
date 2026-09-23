@@ -9,6 +9,7 @@ No hay datos personales del profesor configurados a mano: el nombre y la
 foto se detectan automáticamente al hacer login (ver willaq/autenticacion/login.py).
 """
 
+import os
 from pathlib import Path
 
 # Carpeta raíz del proyecto (dos niveles arriba de este archivo: willaq/config.py -> raíz)
@@ -39,3 +40,49 @@ DIR_PERFIL_NAVEGADOR = DIR_DATOS / "perfil_navegador"
 
 # Carpeta donde se guardan los archivos Excel generados (plantillas de anuncios, etc.)
 DIR_PLANTILLAS = DIR_BASE / "plantillas_generadas"
+
+
+def _leer_variable_de_env(nombre: str):
+    """Lee una variable de un archivo .env en la raíz del proyecto.
+
+    Sin depender de ninguna librería externa (por ahora solo hace falta
+    esta variable): si ya existe de verdad en el entorno del sistema
+    operativo, se respeta esa; si no, se busca en .env. Devuelve None si
+    no está en ningún lado.
+    """
+    if nombre in os.environ:
+        return os.environ[nombre]
+    ruta_env = DIR_BASE / ".env"
+    if not ruta_env.exists():
+        return None
+    try:
+        for linea in ruta_env.read_text(encoding="utf-8").splitlines():
+            linea = linea.strip()
+            if not linea or linea.startswith("#") or "=" not in linea:
+                continue
+            clave, _, valor = linea.partition("=")
+            if clave.strip() == nombre:
+                return valor.strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return None
+
+
+# Una sola variable (en .env, ver .env.example) que activa o desactiva la
+# ventana visible del navegador en TODAS las herramientas que normalmente
+# corren sin ella (Obtener Cursos, Generar/Eliminar Anuncios, Generar
+# Sesiones Dictado, Obtener Notas, probar credenciales de Gestión
+# Docente): sirve para depurar, ver a dónde navega o revisar el HTML real
+# de una pantalla, sin tener que tocar el código.
+#
+# NO afecta el login de Blackboard (el SMS/código de verificación) ni el
+# paso del token en "Procesar Notas Gestión Docente": esos SIEMPRE
+# muestran la ventana, porque el profesor tiene que escribir algo ahí a
+# mano sin importar esta variable.
+MOSTRAR_NAVEGADOR = (_leer_variable_de_env("MOSTRAR_NAVEGADOR") or "").strip().lower() in (
+    "1",
+    "true",
+    "verdadero",
+    "si",
+    "sí",
+)

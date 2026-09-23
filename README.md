@@ -121,6 +121,14 @@ flowchart TB
     style P fill:#7c5cff,stroke:#7c5cff,color:#fff
 ```
 
+📌 **Cuando termines el código de verificación, Microsoft te va a preguntar esto:**
+
+<p align="center">
+  <img src="docs/img/mantener-sesion-iniciada.png" alt="Ventana de Microsoft preguntando '¿Quiere mantener la sesión iniciada?'" width="380">
+</p>
+
+Marca la casilla **"No volver a mostrar"** y haz clic en **"Sí"**, tal cual se ve en la imagen. Es lo que hace que la próxima vez no te vuelva a pedir el código.
+
 🔐 **Sobre tu contraseña de Gestión Docente:** queda guardada en tu computadora, cifrada por Windows, en la carpeta `datos/` — que nunca se sube a ningún lado y solo tu usuario de Windows puede abrir. Si algún día cambias de contraseña, el panel te avisa y la reescribes ahí mismo. Con **"Olvidar credenciales"** la borras cuando quieras.
 
 ---

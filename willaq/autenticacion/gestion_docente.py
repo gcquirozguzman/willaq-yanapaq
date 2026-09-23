@@ -35,6 +35,7 @@ from playwright.sync_api import sync_playwright
 from willaq.autenticacion import credenciales
 from willaq.config import (
     DIR_DATOS,
+    MOSTRAR_NAVEGADOR,
     URL_GESTION_DOCENTE,
     URL_GESTION_DOCENTE_REGISTRO_NOTAS,
 )
@@ -74,12 +75,10 @@ TEXTOS_LOGIN_RECHAZADO = (
     "usuario o contrasena",
 )
 
-# Mientras todavía estamos aprendiendo cómo se comporta este portal, la
-# comprobación de credenciales se hace con el navegador A LA VISTA, para
-# poder mirar qué pasa (pantallas intermedias, avisos, tokens). Cuando el
-# flujo esté claro, basta con poner esto en False y la comprobación vuelve
-# a hacerse sin ventana, en segundo plano.
-MOSTRAR_NAVEGADOR_AL_PROBAR = True
+# Sin ventana visible por defecto; MOSTRAR_NAVEGADOR (ver willaq/config.py,
+# variable de .env) la muestra igual, para depurar (pantallas intermedias,
+# avisos, tokens).
+MOSTRAR_NAVEGADOR_AL_PROBAR = MOSTRAR_NAVEGADOR
 
 # Cuánto se deja la ventana abierta al terminar la prueba, solo cuando se
 # está mirando: si se cerrara al instante no daría tiempo de ver dónde
@@ -351,8 +350,8 @@ def probar_credenciales(usuario: str, clave: str, notificar=None) -> dict:
     activa" y la herramienta diciendo que había expirado), y Académico es
     justamente por donde se llega a las notas.
 
-    La ventana se ve o no según MOSTRAR_NAVEGADOR_AL_PROBAR; por ahora se
-    ve, para poder seguir con la vista lo que hace el portal.
+    La ventana se ve o no según MOSTRAR_NAVEGADOR_AL_PROBAR (variable
+    MOSTRAR_NAVEGADOR de .env; ver willaq/config.py).
 
     Devuelve {"estado": "activa"|"credenciales"|"error", "error": "..."}.
     """

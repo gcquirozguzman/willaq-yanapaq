@@ -30,6 +30,7 @@ from willaq.autenticacion import credenciales as credenciales_gestion_docente
 from willaq.autenticacion import gestion_docente
 from willaq.autenticacion.login import (
     RUTA_AVATAR_DOCENTE,
+    borrar_sesion_guardada,
     cargar_estado_sesion_guardado,
     ejecutar_login,
 )
@@ -43,6 +44,7 @@ from willaq.cursos.listar import (
     cargar_grupos_elegidos,
     guardar_grupos_elegidos,
     obtener_cursos_activos,
+    reiniciar_configuraciones as reiniciar_lista_cursos,
 )
 from willaq.dictado.feriados import guardar_feriados, obtener_feriados
 from willaq.dictado.publicar import eliminar_sesiones_en_blackboard, generar_sesiones_en_blackboard
@@ -127,11 +129,6 @@ def crear_app() -> Flask:
         hilo.start()
         return jsonify({"ok": True})
 
-    @app.post("/api/login/confirmar-login-manual")
-    def confirmar_login_manual():
-        estado_login.evento_login_manual.set()
-        return jsonify({"ok": True})
-
     @app.post("/api/login/confirmar-cierre")
     def confirmar_cierre():
         estado_login.evento_cierre.set()
@@ -140,6 +137,49 @@ def crear_app() -> Flask:
     @app.get("/api/login/estado")
     def consultar_estado_login():
         return jsonify(estado_login.snapshot())
+
+    @app.post("/api/sesiones/borrar-todas")
+    def borrar_todas_las_sesiones():
+        """Deja el panel como recién instalado, para empezar de cero.
+
+        Borra el perfil de navegador y la identidad en caché de Blackboard,
+        olvida las credenciales de Gestión Docente, y reinicia todo lo que
+        depende de la lista de cursos obtenida con esa sesión: la lista
+        misma, las fechas de cada curso, los anuncios semanales, las
+        sesiones de dictado, las reprogramaciones y las notas guardadas.
+        Los feriados NO se tocan: no dependen de ninguna sesión ni de la
+        lista de cursos, así que borrar accesos no debería hacer que el
+        docente tenga que volver a cargarlos.
+        """
+        if (
+            estado_login.en_progreso
+            or estado_login_gestion_docente.en_progreso
+            or estado_cursos.en_progreso
+        ):
+            return jsonify({"error": "Espera a que termine la operación en curso."}), 409
+
+        error_blackboard = None
+        try:
+            borrar_sesion_guardada()
+        except OSError as error:
+            error_blackboard = str(error)
+
+        credenciales_gestion_docente.olvidar()
+        estado_login.limpiar_sesion()
+        estado_login_gestion_docente.marcar_terminado("sin_credenciales", sesion_activa=False)
+
+        reiniciar_lista_cursos()
+        reiniciar_fechas_cursos()
+        reiniciar_anuncios_semanales()
+        reiniciar_sesiones_dictado()
+        reiniciar_reprogramaciones()
+        reiniciar_notas()
+        estado_cursos.limpiar()
+        estado_cursos.marcar_terminado("ok", cursos=[])
+
+        if error_blackboard:
+            return jsonify({"ok": False, "error": error_blackboard}), 500
+        return jsonify({"ok": True})
 
     @app.get("/api/gestion-docente/credenciales")
     def consultar_credenciales_gestion_docente():
@@ -332,7 +372,7 @@ def crear_app() -> Flask:
         estado_generar_anuncios.iniciar(total=len(anuncios))
         hilo = threading.Thread(
             target=_generar_anuncios_en_blackboard_en_hilo,
-            args=(datos.get("id_curso"), anuncios),
+            args=(datos.get("id_curso"), anuncios, bool(datos.get("eliminar_anuncios_existentes"))),
             daemon=True,
         )
         hilo.start()
@@ -561,28 +601,42 @@ def _ejecutar_login_en_hilo():
     def notificar(mensaje):
         estado_login.agregar_log(mensaje)
 
-    def esperar_login_manual():
+    def marcar_esperando_login_manual():
         estado_login.marcar_fase("esperando_login_manual")
-        estado_login.evento_login_manual.wait()
-        estado_login.evento_login_manual.clear()
-        estado_login.marcar_fase("ejecutando")
 
     def esperar_orden_de_cierre():
         estado_login.marcar_fase("esperando_cierre")
         estado_login.evento_cierre.wait()
         estado_login.evento_cierre.clear()
 
-    try:
-        resultado, datos_docente = ejecutar_login(
-            notificar=notificar,
-            esperar_login_manual=esperar_login_manual,
-            esperar_orden_de_cierre=esperar_orden_de_cierre,
-        )
+    def al_confirmar_sesion(resultado, datos_docente):
+        # Se reporta apenas se confirma la sesión, sin esperar a que el
+        # navegador termine de cerrarse: cerrar un launch_persistent_context
+        # a veces tarda mucho o se cuelga, y si el panel esperara a que
+        # ejecutar_login() retorne para enterarse, se quedaría mostrando
+        # "en proceso" para siempre aunque el login sí haya funcionado.
         estado_login.marcar_terminado(
             resultado,
             nombre_docente=datos_docente.get("nombre"),
             tiene_avatar=bool(datos_docente.get("ruta_avatar")),
         )
+
+    try:
+        resultado, datos_docente = ejecutar_login(
+            notificar=notificar,
+            marcar_esperando_login_manual=marcar_esperando_login_manual,
+            esperar_orden_de_cierre=esperar_orden_de_cierre,
+            al_confirmar_sesion=al_confirmar_sesion,
+        )
+        # "ok"/"activa" ya se reportaron en 'al_confirmar_sesion'; esto solo
+        # cubre "aviso", cuyo resultado final recién se sabe aquí (después
+        # de que el profesor confirma que puede cerrar el navegador).
+        if resultado == "aviso":
+            estado_login.marcar_terminado(
+                resultado,
+                nombre_docente=datos_docente.get("nombre"),
+                tiene_avatar=bool(datos_docente.get("ruta_avatar")),
+            )
     except Exception as error:
         # Capturamos cualquier falla inesperada para mostrarla en el panel
         # en vez de que el hilo muera en silencio y el navegador se quede
@@ -781,7 +835,7 @@ def _obtener_cursos_en_hilo():
         estado_cursos.marcar_terminado("error", error=str(error))
 
 
-def _generar_anuncios_en_blackboard_en_hilo(id_curso, anuncios):
+def _generar_anuncios_en_blackboard_en_hilo(id_curso, anuncios, eliminar_existentes=False):
     """Corre la publicación de anuncios en un hilo aparte, igual que el login."""
 
     def notificar(mensaje):
@@ -794,7 +848,9 @@ def _generar_anuncios_en_blackboard_en_hilo(id_curso, anuncios):
             estado_generar_anuncios.incrementar_procesados()
 
     try:
-        resultado = generar_anuncios_en_blackboard(id_curso, anuncios, notificar=notificar)
+        resultado = generar_anuncios_en_blackboard(
+            id_curso, anuncios, eliminar_existentes=eliminar_existentes, notificar=notificar
+        )
         estado_generar_anuncios.marcar_terminado(resultado=resultado)
     except Exception as error:
         estado_generar_anuncios.agregar_log(f"[ERROR] Ocurrió un problema inesperado: {error}")

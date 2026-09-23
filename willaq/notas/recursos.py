@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, urlparse
 from openpyxl import load_workbook
 from playwright.sync_api import sync_playwright
 
-from willaq.config import DIR_PERFIL_NAVEGADOR
+from willaq.config import DIR_PERFIL_NAVEGADOR, MOSTRAR_NAVEGADOR
 
 # Cuánto se espera a que la URL empiece a descargar antes de dar por hecho
 # que no va a descargar nada y mirar la página.
@@ -282,12 +282,12 @@ def cargar_formulario(url: str, columna: str, notificar=None) -> dict:
 
     with sync_playwright() as playwright:
         # Se usa el perfil de Blackboard porque es el que tiene iniciada la
-        # sesión institucional con la que ese Excel se deja abrir. Y con
-        # ventana a la vista: si la nube pide confirmar algo, el docente lo
-        # ve y puede resolverlo.
+        # sesión institucional con la que ese Excel se deja abrir. Sin
+        # ventana visible por defecto; MOSTRAR_NAVEGADOR (ver
+        # willaq/config.py, variable de .env) la muestra, para depurar.
         contexto = playwright.chromium.launch_persistent_context(
             user_data_dir=str(DIR_PERFIL_NAVEGADOR),
-            headless=False,
+            headless=not MOSTRAR_NAVEGADOR,
             accept_downloads=True,
         )
         try:

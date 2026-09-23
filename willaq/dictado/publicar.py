@@ -96,6 +96,7 @@ from willaq.autenticacion.login import (
     _hacer_clic_en_boton_ingreso,
     _parece_pantalla_de_login,
 )
+from willaq.config import MOSTRAR_NAVEGADOR
 
 # Selectores confirmados con el HTML real de Blackboard/Collaborate.
 SELECTOR_BOTON_OPCIONES_COLLAB = '[analytics-id="course.outline.collab.overflowMenu.showMenu.button"]'
@@ -113,6 +114,27 @@ SELECTOR_BOTON_BUSCAR_SESIONES = 'button[aria-label="Buscar sesiones"]'
 SELECTOR_CAMPO_BUSQUEDA_SESIONES = "input[placeholder*='nombre de la sesión']"
 SELECTOR_BOTON_ELIMINAR_SESION = '[analytics-id="session.session-list.delete-session"]'
 SELECTOR_BOTON_CONFIRMAR_ELIMINAR = "#confirmation-modal-confirm"
+SELECTOR_BOTON_CERRAR_MODAL_ANUNCIOS = 'button[data-analytics-id="course.announcements.modal.close.button"]'
+
+
+def _cerrar_modal_anuncios_nuevos(pagina, notificar):
+    """Cierra, si está abierto, el modal 'Nuevos anuncios del curso'.
+
+    Blackboard lo muestra solo (sin que nadie lo pida) al entrar a la
+    página de contenido de un curso que tiene anuncios sin leer (por
+    ejemplo, justo después de generarlos). Confirmado navegando de verdad:
+    tapa toda la pantalla como un MuiDialog e intercepta el clic sobre el
+    botón de opciones de Collaborate, aunque ese botón siga "visible" para
+    Playwright (por eso el .click() normal fallaba con "elemento
+    intercepta pointer events" en vez de avisar del modal).
+    """
+    boton_cerrar = pagina.locator(SELECTOR_BOTON_CERRAR_MODAL_ANUNCIOS)
+    try:
+        if boton_cerrar.count() > 0 and boton_cerrar.first.is_visible():
+            boton_cerrar.first.click(timeout=5_000)
+            pagina.wait_for_timeout(500)
+    except Exception as error:
+        notificar(f"[AVISO] No se pudo cerrar el modal de anuncios nuevos: {error}")
 
 
 def _formatear_fecha_collaborate(fecha_iso: str) -> str:
@@ -145,6 +167,7 @@ def _abrir_lista_de_sesiones(pagina, id_curso: str, notificar):
     """
     pagina.goto(f"{URL_BLACKBOARD}ultra/courses/{id_curso}/outline")
     _esperar_carga_de_pagina(pagina)
+    _cerrar_modal_anuncios_nuevos(pagina, notificar)
 
     # Sin espera fija antes de estos clics: .click() de Playwright (no el
     # click() de DOM que se usa más abajo, dentro del iframe) ya espera por
@@ -365,12 +388,13 @@ def _iniciar_sesion_blackboard(playwright, notificar):
     Devuelve (contexto, pagina), o (contexto, None) si no hay sesión activa
     (el contexto ya viene cerrado en ese caso, para no dejarlo colgado).
 
-    Sin ventana visible: esto no necesita ninguna acción manual del docente
-    (a diferencia del login, que sí la necesita).
+    Sin ventana visible por defecto: esto no necesita ninguna acción
+    manual del docente. MOSTRAR_NAVEGADOR (ver willaq/config.py, variable
+    de .env) la muestra igual, para depurar.
     """
     contexto = playwright.chromium.launch_persistent_context(
         user_data_dir=str(DIR_PERFIL_NAVEGADOR),
-        headless=True,
+        headless=not MOSTRAR_NAVEGADOR,
     )
     pagina = contexto.pages[0] if contexto.pages else contexto.new_page()
     pagina.goto(URL_BLACKBOARD)

@@ -11,8 +11,10 @@ Cómo funciona (en palabras simples):
 
 2. La PRIMERA vez que se usa, esa carpeta está vacía, así que Blackboard
    redirige al login de Microsoft/Outlook y pide usuario, clave y el código
-   SMS (MFA). Como completar el SMS a mano solo lo puede hacer el profesor,
-   el script se detiene y espera a que el profesor confirme que ya terminó.
+   de verificación (SMS o correo). Como eso solo lo puede completar el
+   profesor a mano, el script no bloquea esperando una confirmación: sondea
+   sola la URL cada pocos segundos hasta detectar que ya salió de esa
+   pantalla (ver _esperar_fin_de_pantalla_de_login).
 
 3. La página principal de Blackboard muestra un botón "Estudiante | Docente"
    que siempre hay que presionar para continuar (con sesión activa te lleva
@@ -28,12 +30,13 @@ Cómo funciona (en palabras simples):
 Este módulo se puede usar tanto desde la terminal (CLI) como desde el panel
 web, por eso los momentos donde se avisa algo al profesor o se espera su
 confirmación están separados en funciones intercambiables ("notificar",
-"esperar_login_manual", "esperar_orden_de_cierre"). Por defecto usan la
-terminal (print/input); el panel web les pasa sus propias versiones basadas
-en botones.
+"marcar_esperando_login_manual", "esperar_orden_de_cierre"). Por defecto
+usan la terminal (print/input); el panel web les pasa sus propias versiones
+basadas en su estado en memoria.
 """
 
 import json
+import shutil
 
 from playwright.sync_api import TimeoutError as ErrorDeTiempoDeEspera
 from playwright.sync_api import sync_playwright
@@ -106,9 +109,55 @@ def cargar_estado_sesion_guardado():
     return None
 
 
+def borrar_sesion_guardada():
+    """Borra la sesión de Blackboard guardada en disco (perfil de navegador,
+    identidad en caché y foto de perfil), para forzar un login desde cero.
+
+    No toca Gestión Docente: esa sesión se olvida aparte, con
+    willaq.autenticacion.credenciales.olvidar().
+
+    Lanza OSError si la carpeta del perfil no se pudo borrar (por ejemplo,
+    si un navegador todavía la tiene abierta), para que quien llama pueda
+    avisarle al docente en vez de fallar en silencio.
+    """
+    if DIR_PERFIL_NAVEGADOR.exists():
+        try:
+            shutil.rmtree(DIR_PERFIL_NAVEGADOR)
+        except OSError as error:
+            raise OSError(
+                "No se pudo borrar la sesión de Blackboard guardada: cierra "
+                "cualquier ventana del navegador que haya quedado abierta e "
+                "inténtalo de nuevo."
+            ) from error
+
+    for ruta in (RUTA_ESTADO_SESION, RUTA_AVATAR_DOCENTE):
+        try:
+            ruta.unlink(missing_ok=True)
+        except Exception:
+            pass  # esto es solo una comodidad de la interfaz; si falla, no es grave
+
+
 def _parece_pantalla_de_login(url: str) -> bool:
     """Indica si la URL actual parece ser una pantalla de login de Microsoft."""
     return any(dominio in url for dominio in DOMINIOS_DE_LOGIN)
+
+
+def _esperar_fin_de_pantalla_de_login(pagina, tiempo_maximo_segundos: int = 600, intervalo_segundos: int = 2):
+    """Sondea la URL actual hasta que deja de verse como pantalla de login de Microsoft.
+
+    El profesor completa su usuario, clave y el código de verificación (SMS
+    o correo) él mismo, directamente en la ventana del navegador; en vez de
+    bloquear esperando que alguien lo confirme a mano desde afuera, esto
+    detecta solo cuándo ya salió de esa pantalla, revisando la URL cada
+    'intervalo_segundos'. 10 minutos de tiempo máximo por defecto alcanza de
+    sobra para cualquier código de verificación; si se agota, quien llama lo
+    nota igual porque vuelve a comprobar la URL después de esta función.
+    """
+    intentos_maximos = max(1, tiempo_maximo_segundos // intervalo_segundos)
+    for _ in range(intentos_maximos):
+        if not _parece_pantalla_de_login(pagina.url):
+            return
+        pagina.wait_for_timeout(intervalo_segundos * 1000)
 
 
 def _esperar_carga_de_pagina(pagina):
@@ -205,17 +254,35 @@ def _extraer_datos_docente(pagina, contexto, notificar) -> dict:
     return datos
 
 
-def ejecutar_login(notificar=None, esperar_login_manual=None, esperar_orden_de_cierre=None):
+def ejecutar_login(
+    notificar=None,
+    marcar_esperando_login_manual=None,
+    esperar_orden_de_cierre=None,
+    al_confirmar_sesion=None,
+):
     """Ejecuta el flujo completo de login y devuelve el resultado.
 
     Parámetros (todos opcionales; si no se pasan, se usa la terminal):
     - notificar(mensaje): muestra un mensaje al profesor. Por defecto, print.
-    - esperar_login_manual(): bloquea hasta que el profesor confirma que ya
-      completó el login y el MFA a mano. Por defecto, espera ENTER.
+    - marcar_esperando_login_manual(): se llama una vez, apenas se detecta la
+      pantalla de login de Microsoft, solo para avisar que se está
+      esperando (por ejemplo, para que el panel web cambie de fase). No
+      bloquea nada: el profesor completa usuario, clave y el código de
+      verificación (SMS o correo) él mismo en la ventana del navegador, y
+      esta función sondea sola la URL hasta detectar que ya salió de esa
+      pantalla (ver _esperar_fin_de_pantalla_de_login). Por defecto no hace
+      nada.
     - esperar_orden_de_cierre(): bloquea hasta que el profesor pide cerrar
       el navegador. Por defecto, espera ENTER. Solo se usa si el login
       terminó en "aviso" (no se pudo confirmar); si terminó en "ok" o
       "activa", el navegador se cierra solo, sin pedir confirmación.
+    - al_confirmar_sesion(resultado, datos_docente): se llama apenas se
+      confirma que la sesión quedó activa ("ok" o "activa"), ANTES de
+      intentar cerrar el navegador. Existe porque cerrar un
+      launch_persistent_context a veces tarda mucho o se queda colgado
+      (visto en Windows), y sin este aviso temprano quien llama (el panel
+      web) nunca se enteraría de que el login sí funcionó, dejando las
+      herramientas bloqueadas indefinidamente. Por defecto no hace nada.
 
     Devuelve una tupla (resultado, datos_docente):
     - resultado es uno de "activa" (ya había sesión vigente), "ok" (se
@@ -224,14 +291,11 @@ def ejecutar_login(notificar=None, esperar_login_manual=None, esperar_orden_de_c
       con valores en None si no se pudo leer el nombre/foto del perfil.
     """
     notificar = notificar or print
-    esperar_login_manual = esperar_login_manual or (
-        lambda: _esperar_por_terminal(
-            ">> Cuando hayas terminado, vuelve aquí y presiona ENTER para continuar..."
-        )
-    )
+    marcar_esperando_login_manual = marcar_esperando_login_manual or (lambda: None)
     esperar_orden_de_cierre = esperar_orden_de_cierre or (
         lambda: _esperar_por_terminal(">> Presiona ENTER para cerrar el navegador...")
     )
+    al_confirmar_sesion = al_confirmar_sesion or (lambda resultado, datos_docente: None)
 
     DIR_PERFIL_NAVEGADOR.mkdir(parents=True, exist_ok=True)
 
@@ -261,9 +325,10 @@ def ejecutar_login(notificar=None, esperar_login_manual=None, esperar_orden_de_c
             notificar("Se detectó la pantalla de inicio de sesión de Microsoft/Outlook.")
             notificar("Por favor, en la ventana del navegador que se abrió:")
             notificar("  1. Ingresa tu correo y contraseña institucional de Cibertec.")
-            notificar("  2. Completa la verificación por SMS (MFA) cuando te la pidan.")
-            notificar("  3. Espera a que termine de cargar tu panel de Blackboard.")
-            esperar_login_manual()
+            notificar("  2. Completa la verificación por SMS o correo (MFA) cuando te la pidan.")
+            notificar("  3. Esto seguirá solo apenas termine de cargar tu panel de Blackboard.")
+            marcar_esperando_login_manual()
+            _esperar_fin_de_pantalla_de_login(pagina)
 
             _esperar_carga_de_pagina(pagina)
 
@@ -282,12 +347,14 @@ def ejecutar_login(notificar=None, esperar_login_manual=None, esperar_orden_de_c
                 resultado = "ok"
                 datos_docente = _extraer_datos_docente(pagina, contexto, notificar)
                 _guardar_estado_sesion(datos_docente)
+                al_confirmar_sesion(resultado, datos_docente)
         else:
             notificar("[OK] Ya tenías una sesión guardada y sigue activa.")
             notificar("     No fue necesario volver a iniciar sesión.")
             resultado = "activa"
             datos_docente = _extraer_datos_docente(pagina, contexto, notificar)
             _guardar_estado_sesion(datos_docente)
+            al_confirmar_sesion(resultado, datos_docente)
 
         if resultado == "aviso":
             # Algo no se pudo confirmar: dejamos que el profesor revise la

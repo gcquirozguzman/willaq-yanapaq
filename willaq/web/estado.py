@@ -17,7 +17,6 @@ class EstadoLogin:
 
     def __init__(self):
         self._candado = threading.Lock()
-        self.evento_login_manual = threading.Event()
         self.evento_cierre = threading.Event()
         self.nombre_docente = None
         self.tiene_avatar = False
@@ -41,8 +40,18 @@ class EstadoLogin:
             self._reiniciar_sin_candado()
             self.en_progreso = True
             self.fase = "ejecutando"
-        self.evento_login_manual.clear()
         self.evento_cierre.clear()
+
+    def limpiar_sesion(self):
+        """Borra también la identidad mostrada (nombre/foto), a diferencia de
+        'iniciar'. Se usa cuando de verdad se borró la sesión guardada en
+        disco (ver willaq/autenticacion/login.py: borrar_sesion_guardada),
+        para que el panel deje de mostrar un docente que ya cerró sesión.
+        """
+        with self._candado:
+            self._reiniciar_sin_candado()
+            self.nombre_docente = None
+            self.tiene_avatar = False
 
     def agregar_log(self, mensaje: str):
         with self._candado:
@@ -107,6 +116,17 @@ class EstadoCursos:
             self._reiniciar_sin_candado()
             self.en_progreso = True
             self.fase = "ejecutando"
+
+    def limpiar(self):
+        """Como 'iniciar', pero también borra 'obtenido_en'.
+
+        Se usa cuando de verdad se borró la lista de cursos guardada en
+        disco (al borrar todos los accesos), para que el panel no siga
+        mostrando la fecha de una lista que ya no existe.
+        """
+        with self._candado:
+            self._reiniciar_sin_candado()
+            self.obtenido_en = None
 
     def agregar_log(self, mensaje: str):
         with self._candado:

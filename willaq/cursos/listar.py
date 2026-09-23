@@ -25,6 +25,7 @@ from willaq.autenticacion.login import (
     _hacer_clic_en_boton_ingreso,
     _parece_pantalla_de_login,
 )
+from willaq.config import MOSTRAR_NAVEGADOR
 from willaq.config import DIR_DATOS
 
 URL_CURSOS = URL_BLACKBOARD + "ultra/course"
@@ -84,6 +85,20 @@ def _guardar_cursos_obtenidos(cursos: list):
         RUTA_CURSOS_GUARDADOS.write_text(json.dumps(contenido), encoding="utf-8")
     except Exception:
         pass  # esto es solo una comodidad de la interfaz; si falla, no afecta la búsqueda
+
+
+def reiniciar_configuraciones():
+    """Borra la lista de cursos activos guardada y los grupos elegidos.
+
+    A diferencia de las demás 'reiniciar_configuraciones' del proyecto (que
+    se llaman cuando SE RENUEVA la lista de cursos), esta se llama cuando se
+    borran todos los accesos guardados: sin sesión, la lista de cursos ya no
+    sirve de nada, así que se vacía junto con todo lo que depende de ella
+    (ver 'Borrar Accesos' en el panel web).
+    """
+    DIR_DATOS.mkdir(parents=True, exist_ok=True)
+    RUTA_CURSOS_GUARDADOS.write_text("{}", encoding="utf-8")
+    RUTA_GRUPOS_ELEGIDOS.write_text("{}", encoding="utf-8")
 
 
 def cargar_cursos_guardados():
@@ -266,12 +281,13 @@ def obtener_cursos_activos(notificar=None, info_actualizacion=None) -> list:
     notificar("Buscando tus cursos activos en Blackboard...")
 
     with sync_playwright() as playwright:
-        # Mismo perfil persistente que el login, pero sin ventana visible:
-        # esto no necesita ninguna acción manual del docente (a diferencia
-        # del login, que sí la necesita para el usuario/clave/SMS).
+        # Mismo perfil persistente que el login, pero sin ventana visible
+        # por defecto: esto no necesita ninguna acción manual del docente.
+        # MOSTRAR_NAVEGADOR (ver willaq/config.py, variable de .env) la
+        # muestra igual, para depurar.
         contexto = playwright.chromium.launch_persistent_context(
             user_data_dir=str(DIR_PERFIL_NAVEGADOR),
-            headless=True,
+            headless=not MOSTRAR_NAVEGADOR,
         )
 
         pagina = contexto.pages[0] if contexto.pages else contexto.new_page()

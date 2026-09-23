@@ -31,10 +31,178 @@ function alternarTema() {
 
 botonTema.addEventListener("click", alternarTema);
 
+// --- Selector de fecha propio (calendario chico, sin librerías) ---
+// El <input type="date"> nativo muestra mm/dd/aaaa o dd/mm/aaaa según el
+// idioma configurado en el NAVEGADOR (no según esta app), y ocultar su
+// texto con CSS rompía el resaltado del segmento con foco y el doble
+// clic (ya se probó). La solución: dejar de usar ese input para mostrar
+// algo. Cada campo de fecha es ahora un <input type="hidden"> (guarda el
+// valor real en ISO "YYYY-MM-DD", igual que antes, así que el resto del
+// código no cambia) más un <button> visible que el docente ve y clickea,
+// siempre en día/mes/año, que abre un calendario propio.
+//
+// El calendario se muestra con el atributo "popover": eso lo dibuja en la
+// misma "capa superior" del navegador que el <dialog> que lo contiene
+// (confirmado: un position:absolute/fixed común quedaba tapado por el
+// propio <dialog>, sin importar el z-index; "popover" es el mecanismo que
+// el navegador ofrece justo para esto), sin tener que tocar el overflow
+// de ningún diálogo.
+function formatearFechaCorta(valorIso) {
+  if (!valorIso) {
+    return "";
+  }
+  const [anio, mes, dia] = valorIso.split("-");
+  if (!anio || !mes || !dia) {
+    return "";
+  }
+  return `${dia}/${mes}/${anio}`;
+}
+
+const MESES_CALENDARIO = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+];
+const DIAS_CALENDARIO = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+
+function _fechaALocalISO(fecha) {
+  const anio = fecha.getFullYear();
+  const mes = String(fecha.getMonth() + 1).padStart(2, "0");
+  const dia = String(fecha.getDate()).padStart(2, "0");
+  return `${anio}-${mes}-${dia}`;
+}
+
+let _contadorCalendarios = 0;
+
+// Activa el selector sobre un par campoOculto (input type="hidden", guarda
+// el valor real) + boton (lo que se ve y se clickea). Devuelve
+// { establecer(iso) } para poder ponerle una fecha por código (al cargar
+// una configuración guardada, sin que el docente la escriba).
+function activarSelectorDeFecha(campoOculto, boton) {
+  _contadorCalendarios += 1;
+  const popover = document.createElement("div");
+  popover.className = "calendario-popover";
+  popover.id = `calendario-popover-${_contadorCalendarios}`;
+  popover.setAttribute("popover", "auto");
+  boton.insertAdjacentElement("afterend", popover);
+
+  let mesMostrado = new Date();
+
+  function actualizarBoton() {
+    const texto = formatearFechaCorta(campoOculto.value);
+    boton.textContent = texto || "dd/mm/aaaa";
+    boton.classList.toggle("vacio", !texto);
+  }
+
+  function dibujar() {
+    const anio = mesMostrado.getFullYear();
+    const mes = mesMostrado.getMonth();
+    const hoyIso = _fechaALocalISO(new Date());
+
+    popover.innerHTML = "";
+
+    const cabecera = document.createElement("div");
+    cabecera.className = "calendario-cabecera";
+    const botonAnterior = document.createElement("button");
+    botonAnterior.type = "button";
+    botonAnterior.textContent = "‹";
+    botonAnterior.setAttribute("aria-label", "Mes anterior");
+    botonAnterior.addEventListener("click", () => {
+      mesMostrado = new Date(anio, mes - 1, 1);
+      dibujar();
+    });
+    const titulo = document.createElement("span");
+    titulo.textContent = `${MESES_CALENDARIO[mes]} ${anio}`;
+    const botonSiguiente = document.createElement("button");
+    botonSiguiente.type = "button";
+    botonSiguiente.textContent = "›";
+    botonSiguiente.setAttribute("aria-label", "Mes siguiente");
+    botonSiguiente.addEventListener("click", () => {
+      mesMostrado = new Date(anio, mes + 1, 1);
+      dibujar();
+    });
+    cabecera.append(botonAnterior, titulo, botonSiguiente);
+    popover.appendChild(cabecera);
+
+    const grilla = document.createElement("div");
+    grilla.className = "calendario-grilla";
+    for (const nombreDia of DIAS_CALENDARIO) {
+      const celda = document.createElement("span");
+      celda.className = "calendario-diasemana";
+      celda.textContent = nombreDia;
+      grilla.appendChild(celda);
+    }
+
+    // La semana empieza en lunes: getDay() da 0=domingo..6=sábado.
+    const primerDiaMes = new Date(anio, mes, 1);
+    const desplazo = (primerDiaMes.getDay() + 6) % 7;
+
+    for (let i = 0; i < 42; i++) {
+      const fecha = new Date(anio, mes, 1 - desplazo + i);
+      const iso = _fechaALocalISO(fecha);
+      const botonDia = document.createElement("button");
+      botonDia.type = "button";
+      botonDia.className = "calendario-dia";
+      botonDia.textContent = String(fecha.getDate());
+      if (fecha.getMonth() !== mes) botonDia.classList.add("fuera-de-mes");
+      if (iso === hoyIso) botonDia.classList.add("hoy");
+      if (iso === campoOculto.value) botonDia.classList.add("elegido");
+      botonDia.addEventListener("click", () => {
+        campoOculto.value = iso;
+        campoOculto.dispatchEvent(new Event("change", { bubbles: true }));
+        actualizarBoton();
+        popover.hidePopover();
+      });
+      grilla.appendChild(botonDia);
+    }
+    popover.appendChild(grilla);
+  }
+
+  boton.addEventListener("click", () => {
+    mesMostrado = campoOculto.value ? new Date(`${campoOculto.value}T00:00:00`) : new Date();
+    dibujar();
+    const posicion = boton.getBoundingClientRect();
+    popover.style.top = `${posicion.bottom + 4}px`;
+    popover.style.left = `${posicion.left}px`;
+    popover.showPopover();
+  });
+
+  actualizarBoton();
+
+  return {
+    establecer(valorIso) {
+      campoOculto.value = valorIso || "";
+      actualizarBoton();
+    },
+  };
+}
+
+function crearSelectorDeFecha(idCampoOculto, idBoton) {
+  const campoOculto = document.getElementById(idCampoOculto);
+  const boton = document.getElementById(idBoton);
+  return activarSelectorDeFecha(campoOculto, boton);
+}
+
+const instanciasFecha = {};
+[
+  ["campo-fecha-inicio-curso", "campo-fecha-inicio-curso-boton"],
+  ["campo-fecha-fin-curso", "campo-fecha-fin-curso-boton"],
+  ["campo-fecha-regularizacion", "campo-fecha-regularizacion-boton"],
+  ["campo-fecha-reprogramada", "campo-fecha-reprogramada-boton"],
+  ["campo-nuevo-feriado", "campo-nuevo-feriado-boton"],
+].forEach(([idCampo, idBoton]) => {
+  instanciasFecha[idCampo] = crearSelectorDeFecha(idCampo, idBoton);
+});
+
+function establecerFecha(idCampo, valorIso) {
+  const instancia = instanciasFecha[idCampo];
+  if (instancia) {
+    instancia.establecer(valorIso);
+  }
+}
+
 // --- Login ---
 
 const botonIniciarLogin = document.getElementById("boton-iniciar-login");
-const botonConfirmarLoginManual = document.getElementById("boton-confirmar-login-manual");
 const botonConfirmarCierre = document.getElementById("boton-confirmar-cierre");
 const registroLogin = document.getElementById("registro-login");
 const puntoEstado = document.getElementById("punto-estado");
@@ -81,8 +249,8 @@ const TEXTOS_ESTADO = {
     clase: "en-proceso",
     titulo: "ESPERANDO LOGIN MANUAL",
     descripcion:
-      "Completa tu usuario, clave y el código SMS en la ventana del navegador. " +
-      'Cuando termines, presiona "Ya completé el login, continuar".',
+      "Completa tu usuario, clave y el código de verificación (SMS o correo) en la ventana del " +
+      "navegador. Esto seguirá solo apenas termines, sin que tengas que avisar nada aquí.",
     etiqueta: "Esperando MFA",
   },
   ok: {
@@ -159,7 +327,6 @@ async function consultarEstadoLogin() {
   actualizarBloqueoHerramientas(sesionActiva);
   actualizarSesionBlackboardEnLista(sesionActiva);
 
-  botonConfirmarLoginManual.classList.toggle("oculto", estado.fase !== "esperando_login_manual");
   botonConfirmarCierre.classList.toggle("oculto", estado.fase !== "esperando_cierre");
 
   if (estado.fase === "terminado") {
@@ -287,19 +454,12 @@ function actualizarBloqueoSesionesDictado() {
 consultarEstadoLogin();
 consultarEstadoCursos();
 
-async function confirmarLoginManual() {
-  botonConfirmarLoginManual.disabled = true;
-  await fetch("/api/login/confirmar-login-manual", { method: "POST" });
-  botonConfirmarLoginManual.disabled = false;
-}
-
 async function confirmarCierre() {
   botonConfirmarCierre.disabled = true;
   await fetch("/api/login/confirmar-cierre", { method: "POST" });
 }
 
 botonIniciarLogin.addEventListener("click", iniciarLogin);
-botonConfirmarLoginManual.addEventListener("click", confirmarLoginManual);
 botonConfirmarCierre.addEventListener("click", confirmarCierre);
 
 // --- Sesión de Gestión Docente ---
@@ -323,6 +483,73 @@ const puntoSesionGestion = document.getElementById("punto-sesion-gestion");
 const estadoSesionGestion = document.getElementById("estado-sesion-gestion");
 const botonLoginGestion = document.getElementById("boton-login-gestion");
 const registroGestion = document.getElementById("registro-gestion");
+
+// --- Borrar todas las sesiones guardadas (botón arriba de la lista) ---
+// Deja el panel como recién instalado: cierra la sesión de Blackboard
+// (perfil de navegador) y olvida las credenciales guardadas de Gestión
+// Docente, y de paso reinicia todo lo que depende de la lista de cursos
+// obtenida con esa sesión (cursos, fechas, anuncios semanales, sesiones de
+// dictado, reprogramaciones y notas guardadas). Los feriados NO se tocan:
+// no dependen de ninguna sesión.
+
+const botonBorrarTodasSesiones = document.getElementById("boton-borrar-todas-sesiones");
+const dialogoConfirmarBorrarSesiones = document.getElementById("dialogo-confirmar-borrar-sesiones");
+const mensajeConfirmarBorrarSesiones = document.getElementById("mensaje-confirmar-borrar-sesiones");
+const botonConfirmarBorrarSesiones = document.getElementById("boton-confirmar-borrar-sesiones");
+const botonCancelarBorrarSesiones = document.getElementById("boton-cancelar-borrar-sesiones");
+
+function confirmarBorrarTodasSesiones() {
+  return new Promise((resolve) => {
+    mensajeConfirmarBorrarSesiones.textContent =
+      "Esto cerrará tu sesión de Blackboard (la próxima vez tendrás que volver a hacer login y el código de " +
+      "verificación) y olvidará el usuario y la contraseña guardados de Gestión Docente. También borrará los " +
+      "cursos obtenidos y todo lo que depende de ellos: fechas, anuncios semanales, sesiones de dictado, " +
+      "reprogramaciones y notas guardadas. Los feriados no se tocan.";
+
+    function aceptar() {
+      limpiar();
+      dialogoConfirmarBorrarSesiones.close();
+      resolve(true);
+    }
+    function cancelar() {
+      limpiar();
+      dialogoConfirmarBorrarSesiones.close();
+      resolve(false);
+    }
+    function limpiar() {
+      botonConfirmarBorrarSesiones.removeEventListener("click", aceptar);
+      botonCancelarBorrarSesiones.removeEventListener("click", cancelar);
+    }
+
+    botonConfirmarBorrarSesiones.addEventListener("click", aceptar);
+    botonCancelarBorrarSesiones.addEventListener("click", cancelar);
+    dialogoConfirmarBorrarSesiones.showModal();
+  });
+}
+
+botonBorrarTodasSesiones.addEventListener("click", async () => {
+  const confirmado = await confirmarBorrarTodasSesiones();
+  if (!confirmado) {
+    return;
+  }
+
+  botonBorrarTodasSesiones.disabled = true;
+  try {
+    const respuesta = await fetch("/api/sesiones/borrar-todas", { method: "POST" });
+    const datos = await respuesta.json().catch(() => ({}));
+    if (!respuesta.ok) {
+      alert(datos.error || "No se pudieron borrar las sesiones.");
+    }
+  } finally {
+    botonBorrarTodasSesiones.disabled = false;
+  }
+
+  // Refleja de inmediato en el panel que ya no hay sesión ni cursos, en vez
+  // de esperar al próximo sondeo periódico.
+  await consultarEstadoLogin();
+  await mirarCredencialesGestion();
+  await consultarEstadoCursos();
+});
 
 const dialogoLoginGestion = document.getElementById("dialogo-login-gestion");
 const campoUsuarioGestion = document.getElementById("campo-usuario-gestion");
@@ -745,12 +972,25 @@ async function buscarTiposNotaEnGestionDocente() {
   actualizarBloqueoProcesarNotasGd();
 }
 
+// Dos secciones del mismo curso (ej. dos comisiones de "GDAT5463 GESTION
+// DE DATOS MASIVOS") comparten el mismo nombre, así que un <select> que
+// solo muestre curso.nombre no deja saber cuál es cuál. curso.codigo (ej.
+// "CIBERTEC.GDAT5463.202609202611.LK137097") sí es único por sección: se
+// usa su último segmento, con el que Blackboard identifica esa sección en
+// concreto, como distintivo corto entre paréntesis.
+function etiquetaCurso(curso) {
+  const codigo = curso.codigo || "";
+  const partes = codigo.split(".");
+  const seccion = partes[partes.length - 1];
+  return seccion ? `${curso.nombre} (${seccion})` : curso.nombre;
+}
+
 function abrirDialogoNotasGd() {
   campoCursoNotasGd.innerHTML = "";
   for (const curso of cursosObtenidos) {
     const opcion = document.createElement("option");
     opcion.value = curso.codigo;
-    opcion.textContent = curso.nombre;
+    opcion.textContent = etiquetaCurso(curso);
     campoCursoNotasGd.appendChild(opcion);
   }
 
@@ -1192,7 +1432,7 @@ function actualizarVisibilidadCasillaFechaPasada() {
 function actualizarVisibilidadFechaRegularizacionManual() {
   campoFechaRegularizacionManual.classList.toggle("oculto", !casillaRegularizarFechaManual.checked);
   if (!casillaRegularizarFechaManual.checked) {
-    campoFechaRegularizacion.value = "";
+    establecerFecha("campo-fecha-regularizacion", "");
   }
 }
 
@@ -1248,7 +1488,7 @@ async function precargarConfiguracionGuardada(codigoCurso) {
   campoHoraFin.value = configuracion ? configuracion.hora_fin_semana : "";
   casillaConfirmarFechaPasada.checked = configuracion ? Boolean(configuracion.confirmar_fecha_pasada) : false;
   casillaRegularizarFechaManual.checked = configuracion ? Boolean(configuracion.regularizar_fecha_manual) : false;
-  campoFechaRegularizacion.value = configuracion ? configuracion.fecha_regularizacion_manual || "" : "";
+  establecerFecha("campo-fecha-regularizacion", configuracion ? configuracion.fecha_regularizacion_manual || "" : "");
   casillaEliminarAnunciosExistentes.checked = configuracion ? Boolean(configuracion.eliminar_anuncios_existentes) : false;
 
   actualizarVisibilidadCasillaFechaPasada();
@@ -1267,7 +1507,7 @@ function abrirAsistenteAnuncios() {
     if (!cursosFechas[curso.codigo]) continue;
     const opcion = document.createElement("option");
     opcion.value = curso.codigo;
-    opcion.textContent = curso.nombre;
+    opcion.textContent = etiquetaCurso(curso);
     campoCurso.appendChild(opcion);
   }
 
@@ -1635,8 +1875,24 @@ function abrirVistaAnuncios() {
 
     for (const [valor, tipo] of columnas) {
       const celda = document.createElement("td");
-      celda.appendChild(crearCeldaEditable(valor, tipo));
-      filaPrincipal.appendChild(celda);
+      if (tipo === "date") {
+        // Igual que los campos de fecha fuera de la tabla: un input oculto
+        // con el valor real (ISO) y un botón visible que abre el
+        // calendario propio, en vez de un <input type="date"> nativo.
+        const campoOculto = document.createElement("input");
+        campoOculto.type = "hidden";
+        campoOculto.className = "celda-editable";
+        campoOculto.value = valor;
+        const boton = document.createElement("button");
+        boton.type = "button";
+        boton.className = "boton-fecha";
+        celda.append(campoOculto, boton);
+        filaPrincipal.appendChild(celda);
+        activarSelectorDeFecha(campoOculto, boton);
+      } else {
+        celda.appendChild(crearCeldaEditable(valor, tipo));
+        filaPrincipal.appendChild(celda);
+      }
     }
 
     const filaDetalle = crearFilaDetalle(anuncio);
@@ -2023,9 +2279,15 @@ async function generarEnBlackboard() {
   }
 
   const anuncios = filasTabla.map(({ tipo, titulo, mensaje, fecha, hora }) => ({ tipo, titulo, mensaje, fecha, hora }));
+  const eliminarExistentes = Boolean(
+    configuracionAnunciosActual && configuracionAnunciosActual.eliminar_anuncios_existentes
+  );
 
+  const avisoEliminar = eliminarExistentes
+    ? " ⚠️ Antes de crearlos, se eliminarán TODOS los anuncios que ya existan en ese curso (marcaste esa casilla al guardar la configuración)."
+    : "";
   const confirmado = await confirmarGenerarEnBlackboard(
-    `Esto creará ${anuncios.length} anuncio(s) reales en Blackboard, en el curso "${cursoInfo.nombre}". ¿Deseas continuar?`
+    `Esto creará ${anuncios.length} anuncio(s) reales en Blackboard, en el curso "${cursoInfo.nombre}".${avisoEliminar} ¿Deseas continuar?`
   );
   if (!confirmado) {
     return;
@@ -2039,7 +2301,7 @@ async function generarEnBlackboard() {
     const resultado = await ejecutarTareaDeFondo(
       "/api/anuncios-semanales/generar-en-blackboard",
       "/api/anuncios-semanales/generar-en-blackboard/estado",
-      { id_curso: cursoInfo.id, anuncios },
+      { id_curso: cursoInfo.id, anuncios, eliminar_anuncios_existentes: eliminarExistentes },
       cargandoGenerarAnuncios,
       textoCargandoGenerarAnuncios
     );
@@ -2454,8 +2716,8 @@ function abrirModalFechasCurso(curso, fechasEl, botonEl) {
   cursoFechasActual = { curso, fechasEl, botonEl };
   const fechas = cursosFechas[curso.codigo];
   nombreCursoFechas.textContent = curso.nombre;
-  campoFechaInicioCurso.value = fechas ? fechas.fecha_inicio_curso : "";
-  campoFechaFinCurso.value = fechas ? fechas.fecha_fin_curso : "";
+  establecerFecha("campo-fecha-inicio-curso", fechas ? fechas.fecha_inicio_curso : "");
+  establecerFecha("campo-fecha-fin-curso", fechas ? fechas.fecha_fin_curso : "");
   mensajeFechasCurso.textContent = "";
   dialogoFechasCurso.showModal();
 }
@@ -2684,7 +2946,7 @@ function abrirAsistenteSesiones(codigoPreseleccionado) {
     if (!cursosFechas[curso.codigo]) continue;
     const opcion = document.createElement("option");
     opcion.value = curso.codigo;
-    opcion.textContent = curso.nombre;
+    opcion.textContent = etiquetaCurso(curso);
     campoCursoSesiones.appendChild(opcion);
   }
 
@@ -3132,7 +3394,7 @@ function actualizarHoraFinReprogramada() {
 function abrirModalReprogramarSesion(sesion) {
   sesionReprogramarActual = sesion;
   nombreSesionReprogramar.textContent = sesion.sesion;
-  campoFechaReprogramada.value = sesion.fecha;
+  establecerFecha("campo-fecha-reprogramada", sesion.fecha);
   campoHoraInicioReprogramada.value = sesion.horaInicio;
   campoDetalleReprogramada.value = sesion.detalleCambio || "";
   mensajeReprogramarSesion.textContent = "";
@@ -3282,7 +3544,7 @@ function agregarFeriado() {
   const sinEsaFecha = ultimosFeriadosCargados.filter((feriado) => feriado.fecha !== fecha);
   guardarListaFeriados([...sinEsaFecha, { fecha, motivo }]);
 
-  campoNuevoFeriado.value = "";
+  establecerFecha("campo-nuevo-feriado", "");
   campoMotivoNuevoFeriado.value = "";
 }
 
@@ -3765,7 +4027,7 @@ function abrirDialogoNotas() {
   for (const curso of cursosObtenidos) {
     const opcion = document.createElement("option");
     opcion.value = curso.codigo;
-    opcion.textContent = curso.nombre;
+    opcion.textContent = etiquetaCurso(curso);
     campoCursoNotas.appendChild(opcion);
   }
 

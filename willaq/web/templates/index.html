@@ -29,9 +29,14 @@
   <main class="panel">
     <div class="columna-principal">
       <section class="tarjeta tarjeta-estado">
-        <div class="etiqueta-monoespaciada">
-          <span id="punto-estado" class="punto-estado"></span>
-          SYSTEM://LOGIN_BLACKBOARD
+        <div class="cabecera-tarjeta-estado">
+          <div class="etiqueta-monoespaciada">
+            <span id="punto-estado" class="punto-estado"></span>
+            SYSTEM://LOGIN_BLACKBOARD
+          </div>
+          <button id="boton-borrar-todas-sesiones" class="boton-pequeno boton-peligro" type="button">
+            Borrar Accesos
+          </button>
         </div>
 
         <h1 id="titulo-estado" class="titulo-hero">INACTIVO</h1>
@@ -56,9 +61,6 @@
               <p class="estado-sesion" id="estado-sesion-blackboard">Sin verificar</p>
             </div>
             <button id="boton-iniciar-login" class="boton-pequeno" type="button">Iniciar sesión</button>
-            <button id="boton-confirmar-login-manual" class="boton-pequeno oculto" type="button">
-              Ya completé el login
-            </button>
             <button id="boton-confirmar-cierre" class="boton-pequeno oculto" type="button">
               Cerrar navegador
             </button>
@@ -197,6 +199,21 @@
     </aside>
   </main>
 
+  <dialog id="dialogo-confirmar-borrar-sesiones" class="dialogo">
+    <div class="dialogo-contenido">
+      <h2>¿Borrar todas las sesiones guardadas?</h2>
+      <p class="descripcion-dialogo" id="mensaje-confirmar-borrar-sesiones"></p>
+      <div class="botonera">
+        <button type="button" id="boton-confirmar-borrar-sesiones" class="boton boton-peligro">
+          Sí, borrar
+        </button>
+        <button type="button" id="boton-cancelar-borrar-sesiones" class="boton boton-secundario">
+          Cancelar
+        </button>
+      </div>
+    </div>
+  </dialog>
+
   <dialog id="dialogo-confirmar-cursos" class="dialogo">
     <div class="dialogo-contenido">
       <h2>¿Obtener cursos activos?</h2>
@@ -230,11 +247,13 @@
       <div class="fila-campos">
         <label class="campo">
           <span class="etiqueta-campo">Fecha de inicio del curso</span>
-          <input type="date" id="campo-fecha-inicio-curso" required>
+          <input type="hidden" id="campo-fecha-inicio-curso">
+          <button type="button" class="boton-fecha" id="campo-fecha-inicio-curso-boton"></button>
         </label>
         <label class="campo">
           <span class="etiqueta-campo">Fecha de fin del curso</span>
-          <input type="date" id="campo-fecha-fin-curso" required>
+          <input type="hidden" id="campo-fecha-fin-curso">
+          <button type="button" class="boton-fecha" id="campo-fecha-fin-curso-boton"></button>
         </label>
       </div>
 
@@ -298,7 +317,8 @@
 
       <label class="campo oculto" id="campo-fecha-regularizacion-manual">
         <span class="etiqueta-campo">Fecha desde la cual regularizar</span>
-        <input type="date" id="campo-fecha-regularizacion">
+        <input type="hidden" id="campo-fecha-regularizacion">
+        <button type="button" class="boton-fecha" id="campo-fecha-regularizacion-boton"></button>
       </label>
 
       <label class="campo campo-casilla campo-alerta" id="campo-eliminar-anuncios-existentes">
@@ -522,7 +542,8 @@
 
       <label class="campo">
         Nueva fecha
-        <input type="date" id="campo-fecha-reprogramada" required>
+        <input type="hidden" id="campo-fecha-reprogramada">
+        <button type="button" class="boton-fecha" id="campo-fecha-reprogramada-boton"></button>
       </label>
       <label class="campo">
         Nueva hora de inicio
@@ -573,7 +594,8 @@
       <div class="fila-campos fila-campos-alineada-abajo">
         <label class="campo">
           <span class="etiqueta-campo">Fecha</span>
-          <input type="date" id="campo-nuevo-feriado">
+          <input type="hidden" id="campo-nuevo-feriado">
+          <button type="button" class="boton-fecha" id="campo-nuevo-feriado-boton"></button>
         </label>
         <label class="campo">
           <span class="etiqueta-campo">Motivo</span>
