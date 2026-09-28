@@ -108,13 +108,14 @@ def olvidar_recurso_nota(curso_codigo: str, nombre: str):
         _guardar(RUTA_NOTAS, notas)
 
 
-def guardar_datos_gd(curso_codigo: str, tipos: list, alumnos: list):
+def guardar_datos_gd(curso_codigo: str, tipos: list, alumnos: list, clase: str = None):
     """Guarda lo que se trajo de Gestión Docente de un curso.
 
-    Son dos cosas de un mismo viaje: los tipos de nota (T1, EF...) y la
-    lista de alumnos tal como la nombra el portal. Los nombres importan
-    porque son con los que hay que cruzar las notas de Blackboard, que
-    escribe los nombres a su manera.
+    Son tres cosas de un mismo viaje: los tipos de nota (T1, EF...), la
+    lista de alumnos tal como la nombra el portal y la clase del portal que
+    se identificó como este curso. Los nombres importan porque son con los
+    que hay que cruzar las notas de Blackboard, que escribe los nombres a su
+    manera; la clase, para que al escribir las notas se abra la misma.
     """
     if not curso_codigo:
         return
@@ -122,13 +123,14 @@ def guardar_datos_gd(curso_codigo: str, tipos: list, alumnos: list):
     todos[curso_codigo] = {
         "tipos": tipos or [],
         "alumnos": alumnos or [],
+        "clase": clase,
         "obtenido_en": _ahora(),
     }
     _guardar(RUTA_TIPOS_NOTA_GD, todos)
 
 
 def obtener_datos_gd(curso_codigo: str):
-    """Devuelve {"tipos", "alumnos", "obtenido_en"} de un curso, o None."""
+    """Devuelve {"tipos", "alumnos", "clase", "obtenido_en"} de un curso, o None."""
     return _cargar(RUTA_TIPOS_NOTA_GD).get(curso_codigo)
 
 

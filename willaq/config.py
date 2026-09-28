@@ -27,6 +27,10 @@ URL_GESTION_DOCENTE = "https://gestiondocente.cibertec.edu.pe/"
 # Pantalla de Gestión Docente donde se registran las notas de un curso.
 URL_GESTION_DOCENTE_REGISTRO_NOTAS = URL_GESTION_DOCENTE + "Academico/Secure/RegNotas.aspx"
 
+# Pantalla de Reportes: su "Reporte de notas" muestra los alumnos de una
+# clase sin pedir token, y así se sabe cuál clase es cuál.
+URL_GESTION_DOCENTE_REPORTES = URL_GESTION_DOCENTE + "Academico/Secure/reportes.aspx"
+
 # Carpeta donde se guarda el perfil de navegador (cookies, sesión iniciada).
 # Es información sensible y personal de cada profesor: nunca se sube al repo.
 DIR_DATOS = DIR_BASE / "datos"

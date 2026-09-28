@@ -324,6 +324,11 @@ def crear_app() -> Flask:
         if not notas:
             return jsonify({"error": "El cálculo no dejó ninguna nota que escribir."}), 400
 
+        # Se escribe en la misma clase del portal de la que salieron los
+        # alumnos: si el curso tiene varias, así no hay que volver a
+        # averiguar cuál es.
+        curso = {**curso, "clase_gd": guardado.get("clase")}
+
         estado_procesar_notas_gd.iniciar()
         hilo = threading.Thread(
             target=_escribir_notas_gd_en_hilo, args=(curso, tipo_gd, notas), daemon=True
@@ -699,6 +704,7 @@ def _obtener_datos_gd_en_hilo(curso: dict):
                 curso.get("codigo"),
                 resultado.get("tipos") or [],
                 resultado.get("alumnos") or [],
+                clase=resultado.get("clase"),
             )
         # Si el portal rechazó las credenciales guardadas, la fila de sesión
         # del panel tiene que enterarse: ya no hay con qué entrar.
